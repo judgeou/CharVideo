@@ -42,6 +42,7 @@ std::mutex mut01;
 HDC hdc;
 EditModel* pEdit01;
 HWND hEdit01;
+bool stop = false;
 
 struct FrameData
 {
@@ -114,13 +115,21 @@ void DrawFrameConsole(const FrameData& bitData) {
     vector<WCHAR> screenChars;
     for (int h = 0; h < height; h++) {
         for (int w = 0; w < width; w++) {
-            auto offset = h * (width * 3) + w * 3;
-            auto b = bitArray[offset];
-            auto g = bitArray[offset + 1];
-            auto r = bitArray[offset + 2];
-            auto pixel = RGB(r, g, b);
+            auto offset = h * (width) + w;
+            auto gray = bitArray[offset];
 
-            screenChars.push_back(b > 127 ? L'#' : L'-');
+            if (gray > 192) {
+                screenChars.push_back(L' ');
+            }
+            else if (gray > 128) {
+                screenChars.push_back(L'.');
+            }
+            else if (gray > 64) {
+                screenChars.push_back(L'H');
+            }
+            else {
+                screenChars.push_back(L'#');
+            }
         }
         screenChars.push_back(L'\r');
         screenChars.push_back(L'\n');
@@ -132,6 +141,7 @@ void DrawFrameConsole(const FrameData& bitData) {
 }
 
 int dealFrame(char * infile, HWND hwnd) {
+    stop = false;
     AVFormatContext* pFormatContext = avformat_alloc_context();
     avformat_open_input(&pFormatContext, infile, NULL, NULL);
 
@@ -157,7 +167,7 @@ int dealFrame(char * infile, HWND hwnd) {
             SwsContext* swsContext = sws_getContext(width, height, pCodecContext->pix_fmt, width, height, AV_PIX_FMT_BGR24,
                 NULL, NULL, NULL, NULL);
 
-            SwsContext* swsContextCon = sws_getContext(width, height, pCodecContext->pix_fmt, widthCon, heightCon, AV_PIX_FMT_BGR24,
+            SwsContext* swsContextCon = sws_getContext(width, height, pCodecContext->pix_fmt, widthCon, heightCon, AV_PIX_FMT_GRAY8,
                 NULL, NULL, NULL, NULL);
 
             AVPacket* pPacket = av_packet_alloc();
@@ -166,11 +176,11 @@ int dealFrame(char * infile, HWND hwnd) {
             AVFrame* pRgbFrameCon = av_frame_alloc();
             
             int num_bytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, width, height, 1);
-            int num_bytes_con = av_image_get_buffer_size(AV_PIX_FMT_BGR24, widthCon, heightCon, 1);
+            int num_bytes_con = av_image_get_buffer_size(AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
 
             auto startTime = system_clock::now();
 
-            while (av_read_frame(pFormatContext, pPacket) >= 0) {
+            while (av_read_frame(pFormatContext, pPacket) >= 0 && (stop == false)) {
                 avcodec_send_packet(pCodecContext, pPacket);
                 avcodec_receive_frame(pCodecContext, pFrame);
 
@@ -184,7 +194,7 @@ int dealFrame(char * infile, HWND hwnd) {
                     av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, p_global_bgr_buffer,
                         AV_PIX_FMT_BGR24, width, height, 1);
                     av_image_fill_arrays(pRgbFrameCon->data, pRgbFrameCon->linesize, p_global_bgr_buffer_con,
-                        AV_PIX_FMT_BGR24, widthCon, heightCon, 1);
+                        AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
 
                     int64_t pts = av_rescale_q(pFrame->best_effort_timestamp, pFormatContext->streams[i]->time_base, AV_TIME_BASE_Q);
                     auto playTime = startTime + microseconds(pts);
@@ -209,8 +219,17 @@ int dealFrame(char * infile, HWND hwnd) {
             }
 
             sws_freeContext(swsContext);
+            sws_freeContext(swsContextCon);
+            av_frame_free(&pRgbFrameCon);
+            av_frame_free(&pRgbFrame);
+            av_frame_free(&pFrame);
+            av_packet_free(&pPacket);
+            
+            avcodec_free_context(&pCodecContext);
         }
     }
+
+    avformat_free_context(pFormatContext);
 
     return 0;
 }
@@ -229,7 +248,7 @@ void DrawVideoLoop() {
     }
 }
 
-int main(int argc, char * argv[])
+int main()
 {
     av_log_set_level(AV_LOG_QUIET);
 
@@ -252,18 +271,6 @@ int main(int argc, char * argv[])
         ReleaseDC(hWnd, hdc);
     });
 
-    mainWind.AddCommandListener(IDCANCEL, [](HWND hWnd, ...) {
-        DestroyWindow(hWnd);
-    });
-
-    mainWind.AddCommandListener(IDOK, [argv](HWND hWnd, ...) {
-        std::thread([hWnd, argv]() {
-            dealFrame(argv[1], hWnd);
-        }).detach();
-
-        std::thread(DrawVideoLoop).detach();
-    });
-
     mainWind.AddMessageListener(WM_DROPFILES, [](HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         auto hdrop = (HDROP)wParam;
         WCHAR filepath[MAX_PATH];
@@ -276,9 +283,21 @@ int main(int argc, char * argv[])
             dealFrame((char*)(w2s(wfilepath).c_str()), hWnd);
         }).detach();
 
-        std::thread(DrawVideoLoop).detach();
+    });
+
+    mainWind.AddMessageListener(WM_LBUTTONUP, [](...) {
+        stop = true;
     });
 
     return mainWind.Run();
 
+}
+
+int WINAPI wWinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nShowCmd
+) {
+    return main();
 }
