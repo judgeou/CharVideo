@@ -197,6 +197,7 @@ int dealFrame(char * infile, HWND hwnd) {
         }
     }
 
+    avformat_close_input(&pFormatContext);
     avformat_free_context(pFormatContext);
 
     return 0;
