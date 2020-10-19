@@ -152,8 +152,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CharVideo.cpp" />
+    <ClCompile Include="NotepadLogger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="NotepadLogger.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
