@@ -26,8 +26,8 @@ extern "C" {
 }
 
 #include "resource.h"
-#include "..\..\DWnd\Dwnd\DWnd.h"
-#include "..\..\DWnd\Dwnd\ControlModel.h"
+#include "..\Dwnd\DWnd.h"
+#include "..\Dwnd\ControlModel.h"
 #include "NotepadLogger.h"
 
 using std::string;
