@@ -49,7 +49,7 @@ NotepadLogger nlogger;
 
 struct FrameData
 {
-    vector<uint8_t> bit;
+    vector<uint8_t>& bit;
     system_clock::time_point playTime;
     int width;
     int height;
@@ -151,39 +151,38 @@ int dealFrame(char * infile, HWND hwnd) {
             int num_bytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, widthPlay, heightPlay, 1);
             int num_bytes_con = av_image_get_buffer_size(AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
 
+            vector<uint8_t> bgr_buffer(num_bytes);
+            vector<uint8_t> bgr_buffer_con(num_bytes_con);
+
+            auto p_global_bgr_buffer = &bgr_buffer[0];
+            av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, p_global_bgr_buffer,
+                AV_PIX_FMT_BGR24, widthPlay, heightPlay, 1);
+
+            auto p_global_bgr_buffer_con = &bgr_buffer_con[0];
+            av_image_fill_arrays(pRgbFrameCon->data, pRgbFrameCon->linesize, p_global_bgr_buffer_con,
+                AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
+
             auto startTime = system_clock::now();
 
             while (av_read_frame(pFormatContext, pPacket) >= 0 && (stop == false)) {
-                std::async([&]() {
-                    avcodec_send_packet(pCodecContext, pPacket);
-                    avcodec_receive_frame(pCodecContext, pFrame);
+                avcodec_send_packet(pCodecContext, pPacket);
+                avcodec_receive_frame(pCodecContext, pFrame);
 
-                    if (pFrame->best_effort_timestamp >= 0) {
-                        vector<uint8_t> bgr_buffer(num_bytes);
-                        vector<uint8_t> bgr_buffer_con(num_bytes_con);
+                if (pFrame->best_effort_timestamp >= 0) {
+                    int64_t pts = av_rescale_q(pFrame->best_effort_timestamp, pFormatContext->streams[i]->time_base, AV_TIME_BASE_Q);
+                    auto playTime = startTime + microseconds(pts);
 
-                        auto p_global_bgr_buffer = &bgr_buffer[0];
-                        auto p_global_bgr_buffer_con = &bgr_buffer_con[0];
-
-                        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, p_global_bgr_buffer,
-                            AV_PIX_FMT_BGR24, widthPlay, heightPlay, 1);
-                        av_image_fill_arrays(pRgbFrameCon->data, pRgbFrameCon->linesize, p_global_bgr_buffer_con,
-                            AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
-
-                        int64_t pts = av_rescale_q(pFrame->best_effort_timestamp, pFormatContext->streams[i]->time_base, AV_TIME_BASE_Q);
-                        auto playTime = startTime + microseconds(pts);
-
+                    {
                         sws_scale(swsContext, pFrame->data, pFrame->linesize, 0, height, pRgbFrame->data, pRgbFrame->linesize);
-                        sws_scale(swsContextCon, pFrame->data, pFrame->linesize, 0, height, pRgbFrameCon->data, pRgbFrameCon->linesize);
-
                         FrameData p1 = { bgr_buffer, playTime, widthPlay, heightPlay };
                         DrawFrame(p1);
+                    }
+                    {
+                        sws_scale(swsContextCon, pFrame->data, pFrame->linesize, 0, height, pRgbFrameCon->data, pRgbFrameCon->linesize);
                         FrameData p2 = { bgr_buffer_con, playTime, widthCon, heightCon };
                         DrawFrameText(p2);
-
                     }
-
-                });
+                }
             }
 
             sws_freeContext(swsContext);
