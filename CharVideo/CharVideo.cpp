@@ -45,7 +45,9 @@ EditModel* pEdit01;
 DWnd* pMainWind;
 HWND hEdit01;
 bool stop = false;
-NotepadLogger nlogger;
+NotepadLogger* nlogger;
+static enum AVPixelFormat hw_pix_fmt;
+static AVBufferRef* hw_device_ctx = NULL;
 
 struct FrameData
 {
@@ -104,15 +106,45 @@ void DrawFrameText(const FrameData& bitData) {
     WCHAR* text = &screenChars[0];
     std::this_thread::sleep_until(bitData.playTime);
     
-    nlogger.Clear();
-    nlogger.Output(text, false);
+    nlogger->Clear();
+    nlogger->Output(text, false);
+}
+
+static enum AVPixelFormat get_hw_format(AVCodecContext* ctx,
+    const enum AVPixelFormat* pix_fmts)
+{
+    const enum AVPixelFormat* p;
+
+    for (p = pix_fmts; *p != -1; p++) {
+        if (*p == hw_pix_fmt)
+            return *p;
+    }
+
+    fprintf(stderr, "Failed to get HW surface format.\n");
+    return AV_PIX_FMT_NONE;
+}
+
+static int hw_decoder_init(AVCodecContext* ctx, const enum AVHWDeviceType type)
+{
+    int err = 0;
+
+    if ((err = av_hwdevice_ctx_create(&hw_device_ctx, type,
+        NULL, NULL, 0)) < 0) {
+        fprintf(stderr, "Failed to create specified HW device.\n");
+        return err;
+    }
+    ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+
+    return err;
 }
 
 int dealFrame(char * infile, HWND hwnd) {
     stop = false;
+    
+    auto hw_type = AV_HWDEVICE_TYPE_D3D11VA;
+
     AVFormatContext* pFormatContext = avformat_alloc_context();
     avformat_open_input(&pFormatContext, infile, NULL, NULL);
-
     avformat_find_stream_info(pFormatContext, NULL);
 
     for (int i = 0; i < pFormatContext->nb_streams; i++)
@@ -121,6 +153,20 @@ int dealFrame(char * infile, HWND hwnd) {
         AVCodec* pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
 
         if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
+            for (int i = 0;; i++) {
+                const AVCodecHWConfig* config = avcodec_get_hw_config(pLocalCodec, i);
+                if (!config) {
+                    fprintf(stderr, "Decoder %s does not support device type %s.\n",
+                        pLocalCodec->name, av_hwdevice_get_type_name(hw_type));
+                    return -1;
+                }
+                if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
+                    config->device_type == hw_type) {
+                    hw_pix_fmt = config->pix_fmt;
+                    break;
+                }
+            }
+
             width = pLocalCodecParameters->width;
             height = pLocalCodecParameters->height;
             double ratio = (double)width / (double)height;
@@ -135,10 +181,13 @@ int dealFrame(char * infile, HWND hwnd) {
 
             AVCodecContext* pCodecContext = avcodec_alloc_context3(pLocalCodec);
             avcodec_parameters_to_context(pCodecContext, pLocalCodecParameters);
-            avcodec_open2(pCodecContext, pLocalCodec, NULL);
 
-            SwsContext* swsContext = sws_getContext(width, height, pCodecContext->pix_fmt, widthPlay, heightPlay, AV_PIX_FMT_BGR24,
-                NULL, NULL, NULL, NULL);
+            pCodecContext->get_format = get_hw_format;
+            if (hw_decoder_init(pCodecContext, hw_type) < 0) {
+                return -1;
+            }
+
+            avcodec_open2(pCodecContext, pLocalCodec, NULL);
 
             SwsContext* swsContextCon = sws_getContext(width, height, pCodecContext->pix_fmt, widthCon, heightCon, AV_PIX_FMT_GRAY8,
                 NULL, NULL, NULL, NULL);
@@ -147,6 +196,7 @@ int dealFrame(char * infile, HWND hwnd) {
             AVFrame* pFrame = av_frame_alloc();
             AVFrame* pRgbFrame = av_frame_alloc();
             AVFrame* pRgbFrameCon = av_frame_alloc();
+            AVFrame* sw_frame = av_frame_alloc();
             
             int num_bytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, widthPlay, heightPlay, 1);
             int num_bytes_con = av_image_get_buffer_size(AV_PIX_FMT_GRAY8, widthCon, heightCon, 1);
@@ -166,26 +216,40 @@ int dealFrame(char * infile, HWND hwnd) {
 
             while (av_read_frame(pFormatContext, pPacket) >= 0 && (stop == false)) {
                 avcodec_send_packet(pCodecContext, pPacket);
-                avcodec_receive_frame(pCodecContext, pFrame);
+                auto ret = avcodec_receive_frame(pCodecContext, pFrame);
+                if (ret != 0) {
+                    continue;
+                }
 
-                if (pFrame->best_effort_timestamp >= 0) {
-                    int64_t pts = av_rescale_q(pFrame->best_effort_timestamp, pFormatContext->streams[i]->time_base, AV_TIME_BASE_Q);
-                    auto playTime = startTime + microseconds(pts);
-
-                    {
-                        sws_scale(swsContext, pFrame->data, pFrame->linesize, 0, height, pRgbFrame->data, pRgbFrame->linesize);
-                        FrameData p1 = { bgr_buffer, playTime, widthPlay, heightPlay };
-                        DrawFrame(p1);
-                    }
-                    {
-                        sws_scale(swsContextCon, pFrame->data, pFrame->linesize, 0, height, pRgbFrameCon->data, pRgbFrameCon->linesize);
-                        FrameData p2 = { bgr_buffer_con, playTime, widthCon, heightCon };
-                        DrawFrameText(p2);
+                if (pFrame->format == hw_pix_fmt) {
+                    /* retrieve data from GPU to CPU */
+                    if ((ret = av_hwframe_transfer_data(sw_frame, pFrame, 0)) < 0) {
+                        fprintf(stderr, "Error transferring the data to system memory\n");
+                        break;
                     }
                 }
+
+                int64_t pts = av_rescale_q(pFrame->best_effort_timestamp, pFormatContext->streams[i]->time_base, AV_TIME_BASE_Q);
+                auto playTime = startTime + microseconds(pts);
+
+                {
+                    SwsContext* swsContext = sws_getContext(width, height, (AVPixelFormat)sw_frame->format, widthPlay, heightPlay, AV_PIX_FMT_BGR24,
+                        NULL, NULL, NULL, NULL);
+                    sws_scale(swsContext, sw_frame->data, sw_frame->linesize, 0, height, pRgbFrame->data, pRgbFrame->linesize);
+                    FrameData p1 = { bgr_buffer, playTime, widthPlay, heightPlay };
+                    DrawFrame(p1);
+                    sws_freeContext(swsContext);
+                }
+                {
+                    /*sws_scale(swsContextCon, pFrame->data, pFrame->linesize, 0, height, pRgbFrameCon->data, pRgbFrameCon->linesize);
+                    FrameData p2 = { bgr_buffer_con, playTime, widthCon, heightCon };
+                    DrawFrameText(p2);*/
+                }
+
+                // av_packet_unref(pPacket);
             }
 
-            sws_freeContext(swsContext);
+
             sws_freeContext(swsContextCon);
             av_frame_free(&pRgbFrameCon);
             av_frame_free(&pRgbFrame);
