@@ -141,7 +141,7 @@ static int hw_decoder_init(AVCodecContext* ctx, const enum AVHWDeviceType type)
 int dealFrame(char * infile, HWND hwnd) {
     stop = false;
     
-    auto hw_type = AV_HWDEVICE_TYPE_D3D11VA;
+    auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
 
     AVFormatContext* pFormatContext = avformat_alloc_context();
     avformat_open_input(&pFormatContext, infile, NULL, NULL);
