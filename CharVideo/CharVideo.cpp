@@ -218,6 +218,7 @@ int dealFrame(char * infile, HWND hwnd) {
                 avcodec_send_packet(pCodecContext, pPacket);
                 auto ret = avcodec_receive_frame(pCodecContext, pFrame);
                 if (ret != 0) {
+                    av_packet_unref(pPacket);
                     continue;
                 }
 
@@ -246,7 +247,7 @@ int dealFrame(char * infile, HWND hwnd) {
                     DrawFrameText(p2);*/
                 }
 
-                // av_packet_unref(pPacket);
+                av_packet_unref(pPacket);
             }
 
 
@@ -254,8 +255,10 @@ int dealFrame(char * infile, HWND hwnd) {
             av_frame_free(&pRgbFrameCon);
             av_frame_free(&pRgbFrame);
             av_frame_free(&pFrame);
+            av_frame_free(&sw_frame);
             av_packet_free(&pPacket);
             
+            av_buffer_unref(&pCodecContext->hw_device_ctx);
             avcodec_free_context(&pCodecContext);
         }
     }
@@ -268,7 +271,7 @@ int dealFrame(char * infile, HWND hwnd) {
 
 int main()
 {
-    av_log_set_level(AV_LOG_QUIET);
+    // av_log_set_level(AV_LOG_QUIET);
 
     auto hInstance = GetModuleHandle(NULL);
     DWnd mainWind(hInstance, IDD_DIALOG1);
