@@ -24,7 +24,7 @@ DWnd::~DWnd()
 	}
 }
 
-INT_PTR DWnd::Run(bool selfMessageLoop)
+INT_PTR DWnd::Run(bool selfMessageLoop, MsgHandler customLoopHandler)
 {
 	auto hWnd = mainHWnd;
 
@@ -41,6 +41,10 @@ INT_PTR DWnd::Run(bool selfMessageLoop)
 		while (GetMessage(&msg, NULL, 0, 0) > 0) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
+
+			if (customLoopHandler) {
+				customLoopHandler(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+			}
 		}
 		return msg.wParam;
 	}

@@ -9,6 +9,8 @@
 #include <Windows.h>
 #include <windowsx.h>
 
+#define DWND_MSGHADNLE_PARAMS HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
+
 struct TabPage
 {
 	std::wstring title;
@@ -18,7 +20,7 @@ struct TabPage
 
 class DWnd {
 public:
-	typedef std::function<void(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)> MsgHandler;
+	typedef std::function<void(DWND_MSGHADNLE_PARAMS)> MsgHandler;
 
 	HWND mainHWnd;
 	double dpiFactor;
@@ -26,7 +28,7 @@ public:
 	DWnd(HMODULE hInstance, int rcid, HWND fatherHwnd = NULL);
 	~DWnd();
 
-	INT_PTR Run(bool selfMessageLoop = true);
+	INT_PTR Run(bool selfMessageLoop = true, MsgHandler customLoopHandler = nullptr);
 	std::list<DWnd::MsgHandler>::const_iterator AddMessageListener(UINT msg, MsgHandler cb);
 	std::list<DWnd::MsgHandler>::const_iterator AddNotifyListener(int rcid, UINT msg, MsgHandler cb);
 	std::list<DWnd::MsgHandler>::const_iterator AddCommandListener(int command, MsgHandler cb);
@@ -40,8 +42,8 @@ public:
 	void Hide();
 	HWND GetControl(int rcid) const;
 private:
-	static INT_PTR WINAPI WindProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	INT_PTR InternalWindProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	static INT_PTR WINAPI WindProc(DWND_MSGHADNLE_PARAMS);
+	INT_PTR InternalWindProc(DWND_MSGHADNLE_PARAMS);
 
 	static std::map<HWND, DWnd*> dWndThisMap;
 	HMODULE hInstance;
