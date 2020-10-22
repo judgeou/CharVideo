@@ -80,9 +80,11 @@ int CreateSDLWindow() {
 
     SDL_DisplayMode displayMode;
     SDL_GetDisplayMode(0, 0, &displayMode);
-    uint64_t frameCount = 0;
+    uint64_t presentCount = 0;
+    uint64_t playCount = 0;
+    int refresh_rate = displayMode.refresh_rate;
 
-    shared_ptr<FFDecoder> ffdecoder;
+    shared_ptr<FFDecoder> ffdecoder = nullptr;
 
     bool isquit = false;
     SDL_Event event;
@@ -90,15 +92,17 @@ int CreateSDLWindow() {
         int ret;
         if (ffdecoder) {
             ret = SDL_PollEvent(&event);
-            if ((frameCount % (displayMode.refresh_rate / ffdecoder->fps)) == 0) {
+            double ratio = (double)ffdecoder->fps / refresh_rate;
+            if (presentCount != 0 && (double)playCount / presentCount <= ratio) {
                 auto frame = ffdecoder->RequestFrame();
                 SDLPlayFrame(frame);
+                playCount++;
             }
             else {
                 SDL_RenderPresent(renderer);
             }
 
-            frameCount++;
+            presentCount++;
         }
         else {
             ret = SDL_WaitEvent(&event);
@@ -114,7 +118,7 @@ int CreateSDLWindow() {
                 
                 SDL_DestroyTexture(texture);
                 texture = nullptr;
-                
+                ffdecoder = nullptr;
                 ffdecoder = make_shared<FFDecoder>(event.drop.file);
             }
             else if (event.type == SDL_WINDOWEVENT) {
