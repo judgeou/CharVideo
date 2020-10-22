@@ -20,6 +20,8 @@ static AVBufferRef* hw_device_ctx;
 
 class FFDecoder {
 public:
+    AVRational timebase;
+
 	FFDecoder(char * infile) {
 		auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
 
@@ -27,10 +29,11 @@ public:
 		avformat_open_input(&pFormatContext, infile, NULL, NULL);
 		avformat_find_stream_info(pFormatContext, NULL);
 
-        for (int i = 0; i < pFormatContext->nb_streams; i++)
+        for (unsigned int i = 0; i < pFormatContext->nb_streams; i++)
         {
             pLocalCodecParameters = pFormatContext->streams[i]->codecpar;
             pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
+            timebase = pFormatContext->streams[i]->time_base;
 
             if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
                 for (int i = 0;; i++) {
@@ -92,10 +95,12 @@ public:
                     fprintf(stderr, "Error transferring the data to system memory\n");
                     continue;
                 }
+                sw_frame->best_effort_timestamp = pFrame->best_effort_timestamp;
             }
 
             return sw_frame;
         }
+        return nullptr;
     }
 
 private:
