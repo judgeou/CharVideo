@@ -154,6 +154,7 @@
     <ClCompile Include="CharVideo.cpp" />
     <ClCompile Include="hw_decode.c" />
     <ClCompile Include="NotepadLogger.cpp" />
+    <ClCompile Include="SDLApp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="NotepadLogger.h" />

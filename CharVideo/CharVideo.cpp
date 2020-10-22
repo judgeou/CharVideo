@@ -269,7 +269,7 @@ int dealFrame(char * infile, HWND hwnd) {
     return 0;
 }
 
-int main()
+int main1()
 {
     // av_log_set_level(AV_LOG_QUIET);
 
@@ -320,5 +320,5 @@ int WINAPI wWinMain(
     _In_ LPWSTR lpCmdLine,
     _In_ int nShowCmd
 ) {
-    return main();
+    return main1();
 }

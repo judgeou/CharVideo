@@ -24,6 +24,9 @@
     <ClCompile Include="hw_decode.c">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="SDLApp.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
