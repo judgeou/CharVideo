@@ -18,7 +18,6 @@ extern "C" {
 #pragma comment(lib, "avformat.lib")
 
 #include <libavutil/imgutils.h>
-#include <libavutil/time.h>
 #pragma comment(lib, "libavutil.dll.a")
 
 #include <libswscale/swscale.h>
@@ -36,6 +35,9 @@ using std::vector;
 using std::list;
 
 using namespace std::chrono;
+
+int CreateSDLWindow();
+void SDLPlayFrame(AVFrame* pFrame);
 
 int width;
 int height;
@@ -110,9 +112,7 @@ void DrawFrameText(const FrameData& bitData) {
     nlogger->Output(text, false);
 }
 
-static enum AVPixelFormat get_hw_format(AVCodecContext* ctx,
-    const enum AVPixelFormat* pix_fmts)
-{
+static enum AVPixelFormat get_hw_format(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
     const enum AVPixelFormat* p;
 
     for (p = pix_fmts; *p != -1; p++) {
@@ -138,7 +138,7 @@ static int hw_decoder_init(AVCodecContext* ctx, const enum AVHWDeviceType type)
     return err;
 }
 
-int dealFrame(char * infile, HWND hwnd) {
+int dealFrame(char * infile) {
     stop = false;
     
     auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
@@ -175,9 +175,6 @@ int dealFrame(char * infile, HWND hwnd) {
             int widthCon = 200;
             int heightCon = widthCon / ratio / 2;
 
-            RECT clientSize = { 0, 0, width, height };
-            AdjustWindowRect(&clientSize, WS_CAPTION, FALSE);
-            MoveWindow(pMainWind->mainHWnd, 0, 0, clientSize.right - clientSize.left, clientSize.bottom - clientSize.top, true);
 
             AVCodecContext* pCodecContext = avcodec_alloc_context3(pLocalCodec);
             avcodec_parameters_to_context(pCodecContext, pLocalCodecParameters);
@@ -234,12 +231,16 @@ int dealFrame(char * infile, HWND hwnd) {
                 auto playTime = startTime + microseconds(pts);
 
                 {
-                    SwsContext* swsContext = sws_getContext(width, height, (AVPixelFormat)sw_frame->format, widthPlay, heightPlay, AV_PIX_FMT_BGR24,
-                        NULL, NULL, NULL, NULL);
-                    sws_scale(swsContext, sw_frame->data, sw_frame->linesize, 0, height, pRgbFrame->data, pRgbFrame->linesize);
-                    FrameData p1 = { bgr_buffer, playTime, widthPlay, heightPlay };
-                    DrawFrame(p1);
-                    sws_freeContext(swsContext);
+                    //std::this_thread::sleep_until(playTime);
+                    SDLPlayFrame(sw_frame);
+                }
+                {
+                    //SwsContext* swsContext = sws_getContext(width, height, (AVPixelFormat)sw_frame->format, widthPlay, heightPlay, AV_PIX_FMT_BGR24,
+                    //    NULL, NULL, NULL, NULL);
+                    //sws_scale(swsContext, sw_frame->data, sw_frame->linesize, 0, height, pRgbFrame->data, pRgbFrame->linesize);
+                    //FrameData p1 = { bgr_buffer, playTime, widthPlay, heightPlay };
+                    //DrawFrame(p1);
+                    //sws_freeContext(swsContext);
                 }
                 {
                     /*sws_scale(swsContextCon, pFrame->data, pFrame->linesize, 0, height, pRgbFrameCon->data, pRgbFrameCon->linesize);
@@ -271,47 +272,7 @@ int dealFrame(char * infile, HWND hwnd) {
 
 int main1()
 {
-    // av_log_set_level(AV_LOG_QUIET);
-
-    auto hInstance = GetModuleHandle(NULL);
-    DWnd mainWind(hInstance, IDD_DIALOG1);
-    pMainWind = &mainWind;
-    EditModel edit01(mainWind, IDC_EDIT1);
-    pEdit01 = &edit01;
-    hEdit01 = mainWind.GetControl(IDC_EDIT1);
-
-    HFONT hFont = CreateFont(13, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, ANSI_CHARSET,
-        OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE, TEXT("Consolas"));
-    
-    SendMessage(hEdit01, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-    hdc = GetDC(mainWind.mainHWnd);
-
-    mainWind.AddMessageListener(WM_DESTROY, [](HWND hWnd, ...) {
-        // exit thread
-        ReleaseDC(hWnd, hdc);
-    });
-
-    mainWind.AddMessageListener(WM_DROPFILES, [](HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        stop = true;
-
-        Sleep(200); // 稍微等下原来的线程结束
-        auto hdrop = (HDROP)wParam;
-        WCHAR filepath[MAX_PATH];
-
-        DragQueryFile(hdrop, 0, filepath, MAX_PATH);
-        DragFinish(hdrop);
-
-        wstring wfilepath = filepath;
-        std::thread([hWnd, wfilepath]() {
-            dealFrame((char*)(w2s(wfilepath).c_str()), hWnd);
-        }).detach();
-
-    });
-
-    return mainWind.Run();
-
+    return CreateSDLWindow();
 }
 
 int WINAPI wWinMain(

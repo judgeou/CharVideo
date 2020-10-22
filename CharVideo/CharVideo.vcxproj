@@ -157,6 +157,7 @@
     <ClCompile Include="SDLApp.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="FFDecoder.h" />
     <ClInclude Include="NotepadLogger.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>

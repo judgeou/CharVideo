@@ -35,6 +35,9 @@
     <ClInclude Include="NotepadLogger.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="FFDecoder.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="CharVideo.rc">
