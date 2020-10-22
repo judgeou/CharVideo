@@ -1,10 +1,13 @@
 #ifndef GRAPHICS_20201021
 #define GRAPHICS_20201021
 
+#include <array>
 #include <Windows.h>
 #include <d3d11.h>
+#include <d3dcompiler.h>
 #include <wrl.h>
 #pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "D3DCompiler.lib")
 
 using Microsoft::WRL::ComPtr;
 
@@ -55,6 +58,73 @@ public:
 	void ClearBuffer(float r = 0, float g = 0, float b = 0) {
 		FLOAT color[] = { r, g, b, 1.0f };
 		pContext->ClearRenderTargetView(pTarget.Get(), color);
+	}
+
+	auto GetDevice() {
+		return pDevice;
+	}
+
+	void DrawTestTriangle() {
+		struct Vertex {
+			float x, y;
+		};
+
+		Vertex v[] = { 
+			{ 0, 0.5 },
+			{ 0.5, -0.5 },
+			{ -0.5, -0.5 }
+		}; 
+		D3D11_BUFFER_DESC bufferDesc = {};
+		bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+		bufferDesc.CPUAccessFlags = 0;
+		bufferDesc.MiscFlags = 0;
+		bufferDesc.ByteWidth = sizeof(v);
+		bufferDesc.StructureByteStride = sizeof(Vertex);
+		
+		D3D11_SUBRESOURCE_DATA subRes = {};
+		subRes.pSysMem = v;
+
+		ComPtr<ID3D11Buffer> buffer;
+		auto hret = pDevice->CreateBuffer(&bufferDesc, &subRes, &buffer);
+
+		UINT stride = sizeof(Vertex);
+		UINT offset = 0;
+		pContext->IASetVertexBuffers(0, 1, buffer.GetAddressOf(), &stride, &offset);
+
+		ComPtr<ID3D11VertexShader> vertexShader;
+		ComPtr<ID3DBlob> blob;
+		hret = D3DReadFileToBlob(L"Shader\\VertexShader.cso", &blob);
+		hret = pDevice->CreateVertexShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &vertexShader);
+		pContext->VSSetShader(vertexShader.Get(), nullptr, 0);
+
+		ComPtr<ID3D11PixelShader> pixelShader;
+		ComPtr<ID3DBlob> pixelBlob;
+		hret = D3DReadFileToBlob(L"Shader\\PixelShader.cso", &pixelBlob);
+		hret = pDevice->CreatePixelShader(pixelBlob->GetBufferPointer(), pixelBlob->GetBufferSize(), nullptr, &pixelShader);
+		pContext->PSSetShader(pixelShader.Get(), nullptr, 0);
+
+		ComPtr<ID3D11InputLayout> pInputLayout;
+		D3D11_INPUT_ELEMENT_DESC ied[] = {
+			{ "Position", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		};
+		hret = pDevice->CreateInputLayout(ied, std::size(ied), blob->GetBufferPointer(), blob->GetBufferSize(), &pInputLayout);
+		pContext->IASetInputLayout(pInputLayout.Get());
+
+		pContext->OMSetRenderTargets(1, pTarget.GetAddressOf(), nullptr);
+
+		pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		D3D11_VIEWPORT vp;
+		vp.Width = 800;
+		vp.Height = 600;
+		vp.MinDepth = 0;
+		vp.MaxDepth = 1;
+		vp.TopLeftX = 0;
+		vp.TopLeftY = 0;
+		pContext->RSSetViewports(1, &vp);
+
+		pContext->Draw(std::size(v), 0);
 	}
 private:
 	ComPtr<ID3D11Device> pDevice;

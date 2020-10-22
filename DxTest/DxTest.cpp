@@ -14,7 +14,7 @@ int main()
     Graphics graphics(dwnd.mainHWnd);
 
     dwnd.AddMessageListener(WM_PAINT, [&](...) {
-        // graphics.EndFrame();
+        graphics.EndFrame();
      });
 
     dwnd.AddMessageListener(WM_MOUSEMOVE, [&](DWND_MSGHADNLE_PARAMS) {
@@ -26,7 +26,7 @@ int main()
         double x = GET_X_LPARAM(lParam);
         double y = GET_Y_LPARAM(lParam);
         graphics.ClearBuffer(x / width, y / height, 255);
-        graphics.EndFrame();
+        graphics.DrawTestTriangle();
         });
 
     dwnd.Run(true);

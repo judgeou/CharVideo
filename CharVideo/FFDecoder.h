@@ -21,6 +21,7 @@ static AVBufferRef* hw_device_ctx;
 class FFDecoder {
 public:
     AVRational timebase;
+    int fps;
 
 	FFDecoder(char * infile) {
 		auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
@@ -33,9 +34,11 @@ public:
         {
             pLocalCodecParameters = pFormatContext->streams[i]->codecpar;
             pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
-            timebase = pFormatContext->streams[i]->time_base;
 
             if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
+                timebase = pFormatContext->streams[i]->time_base;
+                fps = av_q2d(pFormatContext->streams[i]->r_frame_rate);
+
                 for (int i = 0;; i++) {
                     const AVCodecHWConfig* config = avcodec_get_hw_config(pLocalCodec, i);
                     if (!config) {

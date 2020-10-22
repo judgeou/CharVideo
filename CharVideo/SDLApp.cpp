@@ -76,7 +76,11 @@ int CreateSDLWindow() {
         xheight,          // window height
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
 
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+    SDL_DisplayMode displayMode;
+    SDL_GetDisplayMode(0, 0, &displayMode);
+    uint64_t frameCount = 0;
 
     shared_ptr<FFDecoder> ffdecoder;
 
@@ -86,9 +90,15 @@ int CreateSDLWindow() {
         int ret;
         if (ffdecoder) {
             ret = SDL_PollEvent(&event);
-            auto frame = ffdecoder->RequestFrame();
+            if ((frameCount % (displayMode.refresh_rate / ffdecoder->fps)) == 0) {
+                auto frame = ffdecoder->RequestFrame();
+                SDLPlayFrame(frame);
+            }
+            else {
+                SDL_RenderPresent(renderer);
+            }
 
-            SDLPlayFrame(frame);
+            frameCount++;
         }
         else {
             ret = SDL_WaitEvent(&event);
