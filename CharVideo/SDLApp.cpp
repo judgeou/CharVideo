@@ -20,6 +20,7 @@ using namespace std::chrono;
 SDL_Window* window;
 SDL_Renderer* renderer;
 SDL_Texture* texture;
+uint8_t* nv12buf;
 int xwidth;
 int xheight;
 
@@ -30,12 +31,12 @@ void PrintSDLErr() {
     printf("%s\n", err);
 }
 
-uint8_t* newNv12Plane(uint8_t* data[8], int height, int linesize[8]) {
+uint8_t* newNv12Plane(uint8_t* buf, uint8_t* data[8], int height, int linesize[8]) {
     uint8_t* y = data[0];
     uint8_t* uv = data[1];
     auto y_size = height * linesize[0];
     auto uv_size = height * linesize[1];
-    auto buf = new uint8_t[y_size + uv_size];
+    // auto buf = new uint8_t[y_size + uv_size / 2];
     memcpy(buf, y, y_size);
     memcpy(buf + y_size, uv, uv_size / 2);
     return buf;
@@ -50,14 +51,13 @@ void SDLPlayFrame(AVFrame* pFrame) {
             pFrame->height);
     }
 
-
-    auto buf = newNv12Plane(pFrame->data, pFrame->height, pFrame->linesize);
-    SDL_UpdateTexture(texture, NULL, buf, pFrame->linesize[0]);
+    newNv12Plane(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
+    SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
 
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
-    delete[] buf;
+
 }
 
 int CreateSDLWindow() {
@@ -74,15 +74,11 @@ int CreateSDLWindow() {
         150,     // init window position
         xwidth,           // window width
         xheight,          // window height
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
 
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
-    SDL_DisplayMode displayMode;
-    SDL_GetDisplayMode(0, 0, &displayMode);
-    uint64_t presentCount = 0;
-    uint64_t playCount = 0;
-    int refresh_rate = displayMode.refresh_rate;
+    auto startPlayTime = system_clock::now();
 
     shared_ptr<FFDecoder> ffdecoder = nullptr;
 
@@ -92,17 +88,13 @@ int CreateSDLWindow() {
         int ret;
         if (ffdecoder) {
             ret = SDL_PollEvent(&event);
-            double ratio = (double)ffdecoder->fps / refresh_rate;
-            if (presentCount != 0 && (double)playCount / presentCount <= ratio) {
-                auto frame = ffdecoder->RequestFrame();
-                SDLPlayFrame(frame);
-                playCount++;
-            }
-            else {
-                SDL_RenderPresent(renderer);
-            }
-
-            presentCount++;
+            auto frame = ffdecoder->RequestFrame();
+            int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
+            
+            auto playTime = startPlayTime + microseconds(microsec);
+            std::this_thread::sleep_until(playTime);
+            
+            SDLPlayFrame(frame);
         }
         else {
             ret = SDL_WaitEvent(&event);
@@ -115,11 +107,17 @@ int CreateSDLWindow() {
 
             }
             else if (event.type == SDL_DROPFILE) {
-                
                 SDL_DestroyTexture(texture);
                 texture = nullptr;
                 ffdecoder = nullptr;
                 ffdecoder = make_shared<FFDecoder>(event.drop.file);
+                
+                if (nv12buf != 0) {
+                    delete[] nv12buf;
+                }
+                nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 2];
+                
+                startPlayTime = system_clock::now();
             }
             else if (event.type == SDL_WINDOWEVENT) {
                 switch (event.window.event) {
@@ -145,5 +143,6 @@ int CreateSDLWindow() {
 }
 
 int main() {
+    av_log_set_level(AV_LOG_QUIET);
     return CreateSDLWindow();
 }

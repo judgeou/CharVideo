@@ -15,13 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CharVideo.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="NotepadLogger.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="hw_decode.c">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="SDLApp.cpp">
