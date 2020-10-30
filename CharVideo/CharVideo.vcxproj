@@ -165,11 +165,6 @@
   <ItemGroup>
     <Manifest Include="App.manifest" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Dwnd\Dwnd.vcxproj">
-      <Project>{ea75a198-664d-4d8f-a93b-d6011c9fe099}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

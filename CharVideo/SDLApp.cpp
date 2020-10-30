@@ -54,7 +54,7 @@ void SDLPlayFrame(AVFrame* pFrame) {
     newNv12Plane(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
     SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
 
-    SDL_RenderClear(renderer);
+    // SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
 
