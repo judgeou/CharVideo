@@ -31,7 +31,7 @@ void PrintSDLErr() {
     printf("%s\n", err);
 }
 
-uint8_t* newNv12Plane(uint8_t* buf, uint8_t* data[8], int height, int linesize[8]) {
+uint8_t* MergeNV12Channel(uint8_t* buf, uint8_t* data[8], int height, int linesize[8]) {
     uint8_t* y = data[0];
     uint8_t* uv = data[1];
     auto y_size = height * linesize[0];
@@ -51,7 +51,7 @@ void SDLPlayFrame(AVFrame* pFrame) {
             pFrame->height);
     }
 
-    newNv12Plane(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
+    MergeNV12Channel(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
     SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
 
     // SDL_RenderClear(renderer);
@@ -118,18 +118,6 @@ int CreateSDLWindow() {
                 nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 2];
                 
                 startPlayTime = system_clock::now();
-            }
-            else if (event.type == SDL_WINDOWEVENT) {
-                switch (event.window.event) {
-                case SDL_WINDOWEVENT_SIZE_CHANGED:
-                {
-                    printf("%d %d\n", event.window.data1, event.window.data2);
-
-                    SDL_DestroyTexture(texture);
-                    texture = nullptr;
-                    break;
-                }
-                }
             }
         }
     }
