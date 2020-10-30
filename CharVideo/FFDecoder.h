@@ -24,6 +24,8 @@ public:
     double fps;
     int height;
     int width;
+    int channels;
+    int sample_rate;
 
 	FFDecoder(char * infile) {
 		auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
@@ -38,6 +40,7 @@ public:
             pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
 
             if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
+                videoStreamIndex = i;
                 timebase = pFormatContext->streams[i]->time_base;
 
                 for (int i = 0;; i++) {
@@ -74,6 +77,14 @@ public:
                 pFrame = av_frame_alloc();
                 sw_frame = av_frame_alloc();
             }
+            if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_AUDIO) {
+                audioStreamIndex = i;
+                pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
+                pACodecContext = avcodec_alloc_context3(pLocalCodec);
+                avcodec_parameters_to_context(pACodecContext, pLocalCodecParameters);
+                channels = pACodecContext->channels;
+                sample_rate = pACodecContext->sample_rate;
+            }
         }
 
 	}
@@ -83,6 +94,7 @@ public:
         av_packet_free(&pPacket);
         av_buffer_unref(&pCodecContext->hw_device_ctx);
         avcodec_free_context(&pCodecContext);
+        avcodec_free_context(&pACodecContext);
 
 		avformat_close_input(&pFormatContext);
 		avformat_free_context(pFormatContext);
@@ -90,24 +102,28 @@ public:
 
     AVFrame* RequestFrame() {
         while (av_read_frame(pFormatContext, pPacket) >= 0) {
-            avcodec_send_packet(pCodecContext, pPacket);
-            auto ret = avcodec_receive_frame(pCodecContext, pFrame);
-            if (ret != 0) {
-                av_packet_unref(pPacket);
-                continue;
-            }
+            AVFrame* ret = 0;
+            if (pPacket->stream_index == videoStreamIndex) {
+                ret = DecodePacket(pCodecContext, pPacket);
+                if (ret) {
+                    if (ret->format == hw_pix_fmt) {
+                        av_hwframe_transfer_data(sw_frame, pFrame, 0);
 
-            if (pFrame->format == hw_pix_fmt) {
-                /* retrieve data from GPU to CPU */
-                if ((ret = av_hwframe_transfer_data(sw_frame, pFrame, 0)) < 0) {
-                    fprintf(stderr, "Error transferring the data to system memory\n");
-                    continue;
+                        sw_frame->best_effort_timestamp = pFrame->best_effort_timestamp;
+                        sw_frame->pts = pFrame->pts;
+                        return sw_frame;
+                    }
+                    else {
+                        return pFrame;
+                    }
                 }
-                sw_frame->best_effort_timestamp = pFrame->best_effort_timestamp;
-                sw_frame->pts = pFrame->pts;
             }
-
-            return sw_frame;
+            else if (pPacket->stream_index == audioStreamIndex) {
+                ret = DecodePacket(pACodecContext, pPacket);
+                if (ret) {
+                    return ret;
+                }
+            }
         }
         return nullptr;
     }
@@ -117,10 +133,51 @@ private:
     AVCodecParameters* pLocalCodecParameters;
     AVCodec* pLocalCodec;
     AVCodecContext* pCodecContext = nullptr;
+    AVCodecContext* pACodecContext = nullptr;
     
     AVPacket* pPacket;
     AVFrame* pFrame;
     AVFrame* sw_frame;
+    int videoStreamIndex;
+    int audioStreamIndex;
+
+    AVFrame* DecodePacket(AVCodecContext* dec, const AVPacket* pkt) {
+        int ret = 0;
+
+        // submit the packet to the decoder
+        ret = avcodec_send_packet(dec, pkt);
+        if (ret < 0) {
+            fprintf(stderr, "Error submitting a packet for decoding (%s)\n", av_err2str(ret));
+            return nullptr;
+        }
+
+        // get all the available frames from the decoder
+        while (ret >= 0) {
+            ret = avcodec_receive_frame(dec, pFrame);
+            if (ret < 0) {
+                // those two return values are special and mean there is no output
+                // frame available, but there were no errors during decoding
+                if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+                    return 0;
+
+                fprintf(stderr, "Error during decoding (%s)\n", av_err2str(ret));
+                return nullptr;
+            }
+
+            // write the frame data to output file
+            if (dec->codec->type == AVMEDIA_TYPE_VIDEO) {
+                return pFrame;
+            }
+            else if (dec->codec->type == AVMEDIA_TYPE_AUDIO) {
+                printf("get audio \n");
+            }
+
+            if (ret < 0)
+                return nullptr;
+        }
+
+        return 0;
+    }
 
     static enum AVPixelFormat get_hw_format(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
         const enum AVPixelFormat* p;
