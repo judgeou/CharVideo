@@ -72,21 +72,20 @@ public:
                 fps = av_q2d(pCodecContext->framerate);
                 width = pCodecContext->width;
                 height = pCodecContext->height;
-
-                pPacket = av_packet_alloc();
-                pFrame = av_frame_alloc();
-                sw_frame = av_frame_alloc();
             }
             if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_AUDIO) {
                 audioStreamIndex = i;
-                pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
                 pACodecContext = avcodec_alloc_context3(pLocalCodec);
                 avcodec_parameters_to_context(pACodecContext, pLocalCodecParameters);
+                avcodec_open2(pACodecContext, pLocalCodec, NULL);
                 channels = pACodecContext->channels;
                 sample_rate = pACodecContext->sample_rate;
             }
         }
 
+        pPacket = av_packet_alloc();
+        pFrame = av_frame_alloc();
+        sw_frame = av_frame_alloc();
 	}
 	~FFDecoder() {
         av_frame_free(&sw_frame);
