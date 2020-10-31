@@ -17,45 +17,25 @@ using std::shared_ptr;
 using std::make_shared;
 using namespace std::chrono;
 
-#define SDL_AUDIO_BUFFER_SIZE 1024;
-
-struct AVFrameList {
-    AVFrame pkt;
-    struct AVFrameList* next;
-};
-
-struct PacketQueue {
-    AVFrameList* first_frame, * last_frame;
-    int nb_packets;
-    int size;
-    SDL_mutex* mutex;
-    SDL_cond* cond;
-};
+#define SDL_AUDIO_MIN_BUFFER_SIZE 512
+#define SDL_AUDIO_MAX_CALLBACKS_PER_SEC 30
 
 SDL_Window* window;
 SDL_Renderer* renderer;
 SDL_Texture* texture;
+SDL_AudioDeviceID audioDeviceId;
 uint8_t* nv12buf;
 int xwidth;
 int xheight;
-bool isquit = false;
-shared_ptr<FFDecoder> ffdecoder = nullptr;
-auto startPlayTime = system_clock::now();
-PacketQueue audioQueue;
-int audioDeviceId;
+
+int dealFrame(char* infile);
 
 void PrintSDLErr() {
     auto err = SDL_GetError();
     printf("%s\n", err);
 }
 
-void packet_queue_init (PacketQueue* q) {
-    *q = {};
-    q->mutex = SDL_CreateMutex();
-    q->cond = SDL_CreateCond();
-}
-
-uint8_t* newNv12Plane(uint8_t* buf, uint8_t* data[8], int height, int linesize[8]) {
+uint8_t* MergeNV12Channel(uint8_t* buf, uint8_t* data[8], int height, int linesize[8]) {
     uint8_t* y = data[0];
     uint8_t* uv = data[1];
     auto y_size = height * linesize[0];
@@ -66,62 +46,22 @@ uint8_t* newNv12Plane(uint8_t* buf, uint8_t* data[8], int height, int linesize[8
     return buf;
 }
 
-void SDLPlayFrame(ResponseFrame response) {
-    if (response.videoFrame) {
-        auto pFrame = response.videoFrame;
-        
-        int microsec = pFrame->pts * av_q2d(ffdecoder->timebase) * 1000000;
-        auto playTime = startPlayTime + microseconds(microsec);
-        std::this_thread::sleep_until(playTime);
-
-        if (texture == nullptr) {
-            texture = SDL_CreateTexture(renderer,
-                SDL_PIXELFORMAT_NV12,
-                SDL_TEXTUREACCESS_STREAMING,
-                pFrame->width,
-                pFrame->height);
-        }
-
-        newNv12Plane(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
-        SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
-
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-        SDL_RenderPresent(renderer);
-    }
-    if (response.audioFrame) {
-        auto frame = response.audioFrame;
-        if (audioDeviceId >= 0) {
-            auto datasize = av_samples_get_buffer_size(NULL, 2, 48000, ffdecoder->GetACodecContext()->sample_fmt, 1);
-            SDL_QueueAudio(audioDeviceId, frame->data[0], datasize);
-        }
+void SDLPlayFrame(AVFrame* pFrame) {
+    if (texture == nullptr) {
+        texture = SDL_CreateTexture(renderer,
+            SDL_PIXELFORMAT_NV12,
+            SDL_TEXTUREACCESS_STREAMING,
+            pFrame->width,
+            pFrame->height);
     }
 
-}
+    MergeNV12Channel(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
+    SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
 
-void PlayNewFile(char* file) {
-    SDL_DestroyTexture(texture);
-    texture = nullptr;
-    ffdecoder = nullptr;
-    ffdecoder = make_shared<FFDecoder>(file);
+    // SDL_RenderClear(renderer);
+    SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+    SDL_RenderPresent(renderer);
 
-    if (nv12buf != 0) {
-        delete[] nv12buf;
-    }
-    nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 1.5];
-
-    SDL_AudioSpec audioSpec, audioRealSpec;
-    audioSpec.freq = 48000;
-    audioSpec.format = AUDIO_S16SYS;
-    audioSpec.channels = ffdecoder->audio_channels;
-    audioSpec.silence = 0;
-    audioSpec.samples = SDL_AUDIO_BUFFER_SIZE;
-    audioSpec.callback = nullptr;
-    audioSpec.userdata = ffdecoder->GetACodecContext();
-
-    audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &audioSpec, &audioRealSpec, SDL_AUDIO_ALLOW_ANY_CHANGE);
-
-    startPlayTime = system_clock::now();
 }
 
 int CreateSDLWindow() {
@@ -142,13 +82,33 @@ int CreateSDLWindow() {
 
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
+    auto startPlayTime = system_clock::now();
+
+    shared_ptr<FFDecoder> ffdecoder = nullptr;
+
+    bool isquit = false;
     SDL_Event event;
     while (!isquit) {
         int ret;
         if (ffdecoder) {
+            auto beginStamp = system_clock::now();
             ret = SDL_PollEvent(&event);
-            auto response = ffdecoder->RequestFrame();
-            SDLPlayFrame(response);
+            auto endStamp = system_clock::now();
+            auto blockStamp = endStamp - beginStamp;
+            startPlayTime += blockStamp;
+
+            auto frame = ffdecoder->RequestFrame();
+            if (frame) {
+                if (frame->channels > 0) {
+                    SDL_QueueAudio(audioDeviceId, ffdecoder->audioBuffer, ffdecoder->audioBufferSize);
+                }
+                else {
+                    int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
+                    auto playTime = startPlayTime + microseconds(microsec);
+                    std::this_thread::sleep_until(playTime);
+                    SDLPlayFrame(frame);
+                }
+            }
         }
         else {
             ret = SDL_WaitEvent(&event);
@@ -161,19 +121,30 @@ int CreateSDLWindow() {
 
             }
             else if (event.type == SDL_DROPFILE) {
-                PlayNewFile(event.drop.file);
-            }
-            else if (event.type == SDL_WINDOWEVENT) {
-                switch (event.window.event) {
-                case SDL_WINDOWEVENT_SIZE_CHANGED:
-                {
-                    printf("%d %d\n", event.window.data1, event.window.data2);
+                SDL_DestroyTexture(texture);
+                texture = nullptr;
+                if (audioDeviceId) { SDL_CloseAudioDevice(audioDeviceId); }
 
-                    SDL_DestroyTexture(texture);
-                    texture = nullptr;
-                    break;
+                ffdecoder = nullptr;
+                ffdecoder = make_shared<FFDecoder>(event.drop.file);
+                
+                if (nv12buf != 0) {
+                    delete[] nv12buf;
                 }
-                }
+                nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 2];
+
+                SDL_AudioSpec audioObt = {};
+                SDL_AudioSpec audioSpec = {};
+                audioSpec.freq = ffdecoder->sample_rate;
+                audioSpec.format = AUDIO_F32SYS;
+                audioSpec.channels = ffdecoder->channels;
+                audioSpec.silence = 0;
+                audioSpec.samples = FFMAX(SDL_AUDIO_MIN_BUFFER_SIZE, 2 << av_log2(audioSpec.freq / SDL_AUDIO_MAX_CALLBACKS_PER_SEC));
+                audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &audioSpec, &audioObt, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+
+                SDL_PauseAudioDevice(audioDeviceId, 0);
+
+                startPlayTime = system_clock::now();
             }
         }
     }
