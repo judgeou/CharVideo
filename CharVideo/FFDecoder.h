@@ -13,6 +13,9 @@ extern "C" {
 
 #include <libswscale/swscale.h>
 #pragma comment(lib, "swscale.lib")
+
+#include <libswresample/swresample.h>
+#pragma comment(lib, "swresample.lib")
 }
 
 static AVPixelFormat hw_pix_fmt;
@@ -26,6 +29,8 @@ public:
     int width;
     int channels;
     int sample_rate;
+    uint8_t* audioBuffer;
+    int audioBufferSize;
 
 	FFDecoder(char * infile) {
 		auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
@@ -80,6 +85,20 @@ public:
                 avcodec_open2(pACodecContext, pLocalCodec, NULL);
                 channels = pACodecContext->channels;
                 sample_rate = pACodecContext->sample_rate;
+
+                audioSwrCtx = swr_alloc_set_opts(
+                    nullptr,
+                    pACodecContext->channel_layout,
+                    AV_SAMPLE_FMT_FLT,
+                    pACodecContext->sample_rate,
+                    pACodecContext->channel_layout,
+                    pACodecContext->sample_fmt,
+                    pACodecContext->sample_rate,
+                    0,
+                    0
+                );
+                swr_init(audioSwrCtx);
+                audioBuffer = new uint8_t[0x1000 * pACodecContext->channels * 4];
             }
         }
 
@@ -88,13 +107,15 @@ public:
         sw_frame = av_frame_alloc();
 	}
 	~FFDecoder() {
+        delete[] audioBuffer;
         av_frame_free(&sw_frame);
         av_frame_free(&pFrame);
         av_packet_free(&pPacket);
+        swr_free(&audioSwrCtx);
+
         av_buffer_unref(&pCodecContext->hw_device_ctx);
         avcodec_free_context(&pCodecContext);
         avcodec_free_context(&pACodecContext);
-
 		avformat_close_input(&pFormatContext);
 		avformat_free_context(pFormatContext);
 	}
@@ -120,6 +141,8 @@ public:
             else if (pPacket->stream_index == audioStreamIndex) {
                 ret = DecodePacket(pACodecContext, pPacket);
                 if (ret) {
+                    auto sampleNum = swr_convert(audioSwrCtx, &audioBuffer, pFrame->nb_samples, (const uint8_t**)pFrame->extended_data, pFrame->nb_samples);
+                    audioBufferSize = sampleNum * pFrame->channels * (32 / 8);
                     return ret;
                 }
             }
@@ -133,6 +156,7 @@ private:
     AVCodec* pLocalCodec;
     AVCodecContext* pCodecContext = nullptr;
     AVCodecContext* pACodecContext = nullptr;
+    SwrContext* audioSwrCtx;
     
     AVPacket* pPacket;
     AVFrame* pFrame;
@@ -168,7 +192,7 @@ private:
                 return pFrame;
             }
             else if (dec->codec->type == AVMEDIA_TYPE_AUDIO) {
-                printf("get audio \n");
+                return pFrame;
             }
 
             if (ret < 0)

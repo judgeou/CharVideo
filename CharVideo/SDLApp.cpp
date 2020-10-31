@@ -17,9 +17,13 @@ using std::shared_ptr;
 using std::make_shared;
 using namespace std::chrono;
 
+#define SDL_AUDIO_MIN_BUFFER_SIZE 512
+#define SDL_AUDIO_MAX_CALLBACKS_PER_SEC 30
+
 SDL_Window* window;
 SDL_Renderer* renderer;
 SDL_Texture* texture;
+SDL_AudioDeviceID audioDeviceId;
 uint8_t* nv12buf;
 int xwidth;
 int xheight;
@@ -89,12 +93,20 @@ int CreateSDLWindow() {
         if (ffdecoder) {
             ret = SDL_PollEvent(&event);
             auto frame = ffdecoder->RequestFrame();
-            int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
-            
-            auto playTime = startPlayTime + microseconds(microsec);
-            std::this_thread::sleep_until(playTime);
-            
-            SDLPlayFrame(frame);
+            if (frame->channels > 0) { // audio
+                
+                SDL_QueueAudio(audioDeviceId, ffdecoder->audioBuffer, ffdecoder->audioBufferSize);
+
+            }
+            else {
+                int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
+
+                auto playTime = startPlayTime + microseconds(microsec);
+                std::this_thread::sleep_until(playTime);
+
+                SDLPlayFrame(frame);
+            }
+
         }
         else {
             ret = SDL_WaitEvent(&event);
@@ -109,6 +121,8 @@ int CreateSDLWindow() {
             else if (event.type == SDL_DROPFILE) {
                 SDL_DestroyTexture(texture);
                 texture = nullptr;
+                if (audioDeviceId) { SDL_CloseAudioDevice(audioDeviceId); }
+
                 ffdecoder = nullptr;
                 ffdecoder = make_shared<FFDecoder>(event.drop.file);
                 
@@ -116,7 +130,18 @@ int CreateSDLWindow() {
                     delete[] nv12buf;
                 }
                 nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 2];
-                
+
+                SDL_AudioSpec audioObt = {};
+                SDL_AudioSpec audioSpec = {};
+                audioSpec.freq = ffdecoder->sample_rate;
+                audioSpec.format = AUDIO_F32SYS;
+                audioSpec.channels = ffdecoder->channels;
+                audioSpec.silence = 0;
+                audioSpec.samples = FFMAX(SDL_AUDIO_MIN_BUFFER_SIZE, 2 << av_log2(audioSpec.freq / SDL_AUDIO_MAX_CALLBACKS_PER_SEC));
+                audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &audioSpec, &audioObt, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+
+                SDL_PauseAudioDevice(audioDeviceId, 0);
+
                 startPlayTime = system_clock::now();
             }
         }
