@@ -48,7 +48,7 @@ public:
                 videoStreamIndex = i;
                 timebase = pFormatContext->streams[i]->time_base;
 
-                for (int i = 0;; i++) {
+                for (int i = 0; i < 100; i++) {
                     const AVCodecHWConfig* config = avcodec_get_hw_config(pLocalCodec, i);
                     if (!config) {
                         fprintf(stderr, "Decoder %s does not support device type %s.\n",

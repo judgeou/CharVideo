@@ -91,22 +91,24 @@ int CreateSDLWindow() {
     while (!isquit) {
         int ret;
         if (ffdecoder) {
+            auto beginStamp = system_clock::now();
             ret = SDL_PollEvent(&event);
+            auto endStamp = system_clock::now();
+            auto blockStamp = endStamp - beginStamp;
+            startPlayTime += blockStamp;
+
             auto frame = ffdecoder->RequestFrame();
-            if (frame->channels > 0) { // audio
-                
-                SDL_QueueAudio(audioDeviceId, ffdecoder->audioBuffer, ffdecoder->audioBufferSize);
-
+            if (frame) {
+                if (frame->channels > 0) {
+                    SDL_QueueAudio(audioDeviceId, ffdecoder->audioBuffer, ffdecoder->audioBufferSize);
+                }
+                else {
+                    int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
+                    auto playTime = startPlayTime + microseconds(microsec);
+                    std::this_thread::sleep_until(playTime);
+                    SDLPlayFrame(frame);
+                }
             }
-            else {
-                int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
-
-                auto playTime = startPlayTime + microseconds(microsec);
-                std::this_thread::sleep_until(playTime);
-
-                SDLPlayFrame(frame);
-            }
-
         }
         else {
             ret = SDL_WaitEvent(&event);
