@@ -24,7 +24,7 @@ SDL_Window* window;
 SDL_Renderer* renderer;
 SDL_Texture* texture;
 SDL_AudioDeviceID audioDeviceId;
-uint8_t* nv12buf;
+
 int xwidth;
 int xheight;
 
@@ -55,13 +55,14 @@ void SDLPlayFrame(AVFrame* pFrame) {
             pFrame->height);
     }
 
-    MergeNV12Channel(nv12buf, pFrame->data, pFrame->height, pFrame->linesize);
-    SDL_UpdateTexture(texture, NULL, nv12buf, pFrame->linesize[0]);
+    uint8_t* pixels[4];
+    int pitch[4];
+    SDL_LockTexture(texture, NULL, (void**)pixels, pitch);
+    MergeNV12Channel(pixels[0], pFrame->data, pFrame->height, pFrame->linesize);
+    SDL_UnlockTexture(texture);
 
-    // SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
-
 }
 
 int CreateSDLWindow() {
@@ -78,9 +79,10 @@ int CreateSDLWindow() {
         150,     // init window position
         xwidth,           // window width
         xheight,          // window height
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
-
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
+    
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
     auto startPlayTime = system_clock::now();
 
@@ -127,11 +129,6 @@ int CreateSDLWindow() {
 
                 ffdecoder = nullptr;
                 ffdecoder = make_shared<FFDecoder>(event.drop.file);
-                
-                if (nv12buf != 0) {
-                    delete[] nv12buf;
-                }
-                nv12buf = new uint8_t[ffdecoder->width * ffdecoder->height * 2];
 
                 SDL_AudioSpec audioObt = {};
                 SDL_AudioSpec audioSpec = {};
