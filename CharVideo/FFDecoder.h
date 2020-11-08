@@ -164,11 +164,12 @@ private:
     int videoStreamIndex;
     int audioStreamIndex;
 
-    AVFrame* DecodePacket(AVCodecContext* dec, const AVPacket* pkt) {
+    AVFrame* DecodePacket(AVCodecContext* dec, AVPacket* pkt) {
         int ret = 0;
 
         // submit the packet to the decoder
         ret = avcodec_send_packet(dec, pkt);
+        av_packet_unref(pkt);
         if (ret < 0) {
             fprintf(stderr, "Error submitting a packet for decoding (%s)\n", av_err2str(ret));
             return nullptr;
