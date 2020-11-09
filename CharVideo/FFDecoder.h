@@ -29,12 +29,10 @@ public:
     int width;
     int channels;
     int sample_rate;
-    uint8_t* audioBuffer;
-    int audioBufferSize;
+    uint8_t* audioBuffer = nullptr;
+    int audioBufferSize = 0;
 
 	FFDecoder(char * infile) {
-		auto hw_type = AV_HWDEVICE_TYPE_DXVA2;
-
 		pFormatContext = avformat_alloc_context();
 		avformat_open_input(&pFormatContext, infile, NULL, NULL);
 		avformat_find_stream_info(pFormatContext, NULL);
@@ -48,29 +46,13 @@ public:
                 videoStreamIndex = i;
                 timebase = pFormatContext->streams[i]->time_base;
 
-                for (int i = 0; i < 100; i++) {
-                    const AVCodecHWConfig* config = avcodec_get_hw_config(pLocalCodec, i);
-                    if (!config) {
-                        fprintf(stderr, "Decoder %s does not support device type %s.\n",
-                            pLocalCodec->name, av_hwdevice_get_type_name(hw_type));
-
-                    }
-                    else {
-                        if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-                            config->device_type == hw_type) {
-                            hw_pix_fmt = config->pix_fmt;
-                            break;
-                        }
-                    }
-                }
+                hw_pix_fmt = AV_PIX_FMT_DXVA2_VLD;
 
                 pCodecContext = avcodec_alloc_context3(pLocalCodec);
                 avcodec_parameters_to_context(pCodecContext, pLocalCodecParameters);
 
                 pCodecContext->get_format = get_hw_format;
-                if (hw_decoder_init(pCodecContext, hw_type) < 0) {
-                    // error
-                }
+                hw_decoder_init(pCodecContext, AV_HWDEVICE_TYPE_DXVA2);
 
                 avcodec_open2(pCodecContext, pLocalCodec, NULL);
 
@@ -98,7 +80,7 @@ public:
                     0
                 );
                 swr_init(audioSwrCtx);
-                audioBuffer = new uint8_t[0x1000 * pACodecContext->channels * 4];
+                audioBuffer = new uint8_t[(size_t)0x1000 * pACodecContext->channels * 4];
             }
         }
 
@@ -161,8 +143,8 @@ private:
     AVPacket* pPacket;
     AVFrame* pFrame;
     AVFrame* sw_frame;
-    int videoStreamIndex;
-    int audioStreamIndex;
+    int videoStreamIndex = -1;
+    int audioStreamIndex = -1;
 
     AVFrame* DecodePacket(AVCodecContext* dec, AVPacket* pkt) {
         int ret = 0;
@@ -204,15 +186,7 @@ private:
     }
 
     static enum AVPixelFormat get_hw_format(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
-        const enum AVPixelFormat* p;
-
-        for (p = pix_fmts; *p != -1; p++) {
-            if (*p == hw_pix_fmt)
-                return *p;
-        }
-
-        fprintf(stderr, "Failed to get HW surface format.\n");
-        return AV_PIX_FMT_NONE;
+        return hw_pix_fmt;
     }
 
     static int hw_decoder_init(AVCodecContext* ctx, const enum AVHWDeviceType type)

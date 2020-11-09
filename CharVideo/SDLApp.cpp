@@ -25,9 +25,6 @@ SDL_Renderer* renderer;
 SDL_Texture* texture;
 SDL_AudioDeviceID audioDeviceId;
 
-int xwidth;
-int xheight;
-
 int dealFrame(char* infile);
 
 void PrintSDLErr() {
@@ -71,14 +68,14 @@ int CreateSDLWindow() {
 	}
 
     double ratio = 16.0 / 9.0;
-    xwidth = 1000;
-    xheight = xwidth / ratio;
+    int width = 800;
+    int height = (int)(800 / ratio);
 
     window = SDL_CreateWindow("Player",  // title
         50,     // init window position
         150,     // init window position
-        xwidth,           // window width
-        xheight,          // window height
+        width,           // window width
+        height,          // window height
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);         // flag
     
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
@@ -105,8 +102,8 @@ int CreateSDLWindow() {
                     SDL_QueueAudio(audioDeviceId, ffdecoder->audioBuffer, ffdecoder->audioBufferSize);
                 }
                 else {
-                    int microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
-                    auto playTime = startPlayTime + microseconds(microsec);
+                    double microsec = frame->pts * av_q2d(ffdecoder->timebase) * 1000000;
+                    auto playTime = startPlayTime + microseconds((int)microsec);
                     std::this_thread::sleep_until(playTime);
                     SDLPlayFrame(frame);
                 }
