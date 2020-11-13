@@ -154,7 +154,7 @@ int main(int argc, char** argv)
 				av_frame_free(&cpuFrame);
 				
 				auto currentTicks = SDL_GetTicks();
-				int fps = 1000 / vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+				int fps = 1000 / ((double)vcodecCtx->framerate.num / vcodecCtx->framerate.den);
 				if (currentTicks - fpsTimer < fps) {
 					SDL_Delay(fps - currentTicks + fpsTimer);
 				}
