@@ -124,7 +124,7 @@ int main(int argc, char** argv)
 
 			// 创建对应的纹理
 			texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_NV12, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
-			SDL_SetWindowSize(window, 1280, 720);
+			SDL_SetWindowSize(window, 1920, 1080);
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 		}
 	}
@@ -153,6 +153,7 @@ int main(int argc, char** argv)
 			// 发送给解码器
 			int ret = avcodec_send_packet(vcodecCtx, packet);
 			frameRate = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+			auto timebase = (double)vcodecCtx->time_base.num / vcodecCtx->time_base.den;
 
 			if (ret != 0) {
 				PrintAVErr(ret);
@@ -169,22 +170,18 @@ int main(int argc, char** argv)
 				decodeCount++;
 
 				while (1) {
-					double ratioCount = (double)presentCount / decodeCount;
-					double ratioRate = refreshRate / frameRate;
+					auto currentTicks = SDL_GetTicks();
+					int fps = 1000 / ((double)vcodecCtx->framerate.num / vcodecCtx->framerate.den);
+					if (currentTicks - fpsTimer < fps) {
+						SDL_Delay(fps - currentTicks + fpsTimer);
+					}
+					fpsTimer = SDL_GetTicks();
 
-					if (frameRate <= refreshRate && ratioCount >= ratioRate) {
-						UpdateTexture(frame, texture);
-						UpdateScreen(renderer, texture);
-						presentCount++;
-						break;
-					}
-					else if (ratioCount < ratioRate) {
-						UpdateScreen(renderer, texture);
-						presentCount++;
-					}
-					else if (frameRate > refreshRate && ratioCount >= ratioRate) {
-						break;
-					}
+					UpdateTexture(frame, texture);
+					UpdateScreen(renderer, texture);
+
+					break;
+
 				}
 
 			}
