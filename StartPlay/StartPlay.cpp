@@ -42,6 +42,40 @@ void PrintAVErr(int ret) {
 	printf("%s\n", av_make_error_string(errstr, sizeof(errstr), ret));
 }
 
+void UpdateScreen(SDL_Renderer * renderer, SDL_Texture* texture) {
+	SDL_RenderCopy(renderer, texture, NULL, NULL);
+	SDL_RenderPresent(renderer);
+}
+
+void UpdateTexture(AVFrame* frame, SDL_Texture* texture) {
+	// 把解码后的数据从 GPU 复制到 CPU
+	AVFrame* cpuFrame = av_frame_alloc();
+	av_hwframe_transfer_data(cpuFrame, frame, 0);
+	auto cpuFormat = (AVPixelFormat)cpuFrame->format;
+
+	uint8_t* pixels;
+	int pitch;
+	SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
+
+	size_t ysize = pitch * cpuFrame->height;
+	size_t uvsize = pitch * cpuFrame->height / 2;
+
+	for (int i = 0; i < cpuFrame->height; i++) {
+		void* srcPtr = cpuFrame->data[0] + cpuFrame->linesize[0] * i;
+		void* destPtr = pixels + pitch * i;
+		memcpy(destPtr, srcPtr, pitch);
+	}
+	pixels += pitch * cpuFrame->height;
+	for (int i = 0; i < cpuFrame->height; i++) {
+		void* srcPtr = cpuFrame->data[1] + cpuFrame->linesize[1] / 2 * i;
+		void* destPtr = pixels + pitch / 2 * i;
+		memcpy(destPtr, srcPtr, pitch / 2);
+	}
+
+	SDL_UnlockTexture(texture);
+	av_frame_free(&cpuFrame);
+}
+
 int main(int argc, char** argv)
 {
 	SetProcessDPIAware();
@@ -53,7 +87,7 @@ int main(int argc, char** argv)
 		SDL_WINDOW_RESIZABLE
 	);
 
-	auto renderer = SDL_CreateRenderer(window, -1, 0); // alloc
+	auto renderer = SDL_CreateRenderer(window, -1, SDL_RendererFlags::SDL_RENDERER_PRESENTVSYNC); // alloc
 
 	// auto bmp = SDL_LoadBMP("C:\\Users\\ouzian\\Pictures\\Anime\\1.bmp"); // alloc
 	SDL_Texture* texture = 0;
@@ -95,6 +129,13 @@ int main(int argc, char** argv)
 		}
 	}
 
+	SDL_DisplayMode displayMode;
+	SDL_GetDisplayMode(0, 0, &displayMode);
+	double refreshRate = displayMode.refresh_rate;
+	double frameRate = refreshRate;
+	uint64_t presentCount = 1;
+	uint64_t decodeCount = 0;
+
 	Uint32 fpsTimer = 0;
 	SDL_Event event;
 	while (1) {
@@ -111,6 +152,7 @@ int main(int argc, char** argv)
 		if (packet->stream_index == videoStraemIndex) {
 			// 发送给解码器
 			int ret = avcodec_send_packet(vcodecCtx, packet);
+			frameRate = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
 
 			if (ret != 0) {
 				PrintAVErr(ret);
@@ -124,44 +166,27 @@ int main(int argc, char** argv)
 				continue;
 			}
 			else if (ret == 0) {
-				auto format = (AVPixelFormat)frame->format;
-				
-				// 把解码后的数据从 GPU 复制到 CPU
-				AVFrame* cpuFrame = av_frame_alloc();
-				av_hwframe_transfer_data(cpuFrame, frame, 0);
-				auto cpuFormat = (AVPixelFormat)cpuFrame->format;
+				decodeCount++;
 
-				uint8_t* pixels;
-				int pitch;
-				SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
-				
-				size_t ysize = pitch * cpuFrame->height;
-				size_t uvsize = pitch * cpuFrame->height / 2;
-				
-				for (int i = 0; i < cpuFrame->height; i++) {
-					void* srcPtr = cpuFrame->data[0] + cpuFrame->linesize[0] * i;
-					void* destPtr = pixels + pitch * i;
-					memcpy(destPtr, srcPtr, pitch);
-				}
-				pixels += pitch * cpuFrame->height;
-				for (int i = 0; i < cpuFrame->height; i++) {
-					void* srcPtr = cpuFrame->data[1] + cpuFrame->linesize[1] / 2 * i;
-					void* destPtr = pixels + pitch / 2 * i;
-					memcpy(destPtr, srcPtr, pitch / 2);
+				while (1) {
+					double ratioCount = (double)presentCount / decodeCount;
+					double ratioRate = refreshRate / frameRate;
+
+					if (frameRate <= refreshRate && ratioCount >= ratioRate) {
+						UpdateTexture(frame, texture);
+						UpdateScreen(renderer, texture);
+						presentCount++;
+						break;
+					}
+					else if (ratioCount < ratioRate) {
+						UpdateScreen(renderer, texture);
+						presentCount++;
+					}
+					else if (frameRate > refreshRate && ratioCount >= ratioRate) {
+						break;
+					}
 				}
 
-				SDL_UnlockTexture(texture);
-				av_frame_free(&cpuFrame);
-				
-				auto currentTicks = SDL_GetTicks();
-				int fps = 1000 / ((double)vcodecCtx->framerate.num / vcodecCtx->framerate.den);
-				if (currentTicks - fpsTimer < fps) {
-					SDL_Delay(fps - currentTicks + fpsTimer);
-				}
-				fpsTimer = SDL_GetTicks();
-
-				SDL_RenderCopy(renderer, texture, NULL, NULL);
-				SDL_RenderPresent(renderer);
 			}
 			else {
 				PrintAVErr(ret);

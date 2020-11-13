@@ -3,11 +3,11 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LocalDebuggerWorkingDirectory>D:\vsproject\ConsoleApplication1\ffplay\bin</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArguments>"D:\Video\kanokari-01.mp4"</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>"D:\Video\3.flv"</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LocalDebuggerWorkingDirectory>D:\vsproject\ConsoleApplication1\ffplay\bin</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArguments>"D:\Video\kanokari-01.mp4"</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>"D:\Video\3.flv"</LocalDebuggerCommandArguments>
   </PropertyGroup>
 </Project>
