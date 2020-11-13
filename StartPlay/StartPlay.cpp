@@ -42,7 +42,7 @@ void PrintAVErr(int ret) {
 	printf("%s\n", av_make_error_string(errstr, sizeof(errstr), ret));
 }
 
-int main()
+int main(int argc, char** argv)
 {
 	SetProcessDPIAware();
 
@@ -62,12 +62,13 @@ int main()
 
 	// 打开视频容器
 	AVFormatContext* avfCtx = 0;
-	avformat_open_input(&avfCtx, "D:\\Video\\236565548-1-116.flv", NULL, NULL);
+	avformat_open_input(&avfCtx, argv[1], NULL, NULL);
 	avformat_find_stream_info(avfCtx, NULL);
 
 	AVRational time_base;
 	int videoStraemIndex = 0;
 	AVCodecContext* vcodecCtx = nullptr;
+	AVBufferRef* hw_device = nullptr;
 
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
 		// 获取解码器
@@ -82,16 +83,23 @@ int main()
 			avcodec_parameters_to_context(vcodecCtx, avfCtx->streams[i]->codecpar);
 			avcodec_open2(vcodecCtx, codec, NULL);
 
-			texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
+			// 设置硬件解码设备
+			hw_device = 0;
+			av_hwdevice_ctx_create(&hw_device, AVHWDeviceType::AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, NULL);
+			vcodecCtx->hw_device_ctx = hw_device;
+
+			// 创建对应的纹理
+			texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_NV12, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
 			SDL_SetWindowSize(window, 1280, 720);
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 		}
 	}
 
-	auto startTime = system_clock::now();
+	Uint32 fpsTimer = 0;
 	SDL_Event event;
 	while (1) {
 		SDL_PollEvent(&event);
+
 		if (event.type == SDL_QUIT) {
 			break;
 		}
@@ -117,16 +125,40 @@ int main()
 			}
 			else if (ret == 0) {
 				auto format = (AVPixelFormat)frame->format;
-
-				SDL_UpdateYUVTexture(texture, NULL, 
-					frame->data[0], frame->linesize[0],
-					frame->data[1], frame->linesize[1],
-					frame->data[2], frame->linesize[2]
-				);
 				
-				double ms = frame->pts * ( time_base.num / (double)time_base.den ) * 1000000;
-				auto playTime = startTime + microseconds((int)ms);
-				std::this_thread::sleep_until(playTime);
+				// 把解码后的数据从 GPU 复制到 CPU
+				AVFrame* cpuFrame = av_frame_alloc();
+				av_hwframe_transfer_data(cpuFrame, frame, 0);
+				auto cpuFormat = (AVPixelFormat)cpuFrame->format;
+
+				uint8_t* pixels;
+				int pitch;
+				SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
+				
+				size_t ysize = pitch * cpuFrame->height;
+				size_t uvsize = pitch * cpuFrame->height / 2;
+				
+				for (int i = 0; i < cpuFrame->height; i++) {
+					void* srcPtr = cpuFrame->data[0] + cpuFrame->linesize[0] * i;
+					void* destPtr = pixels + pitch * i;
+					memcpy(destPtr, srcPtr, pitch);
+				}
+				pixels += pitch * cpuFrame->height;
+				for (int i = 0; i < cpuFrame->height; i++) {
+					void* srcPtr = cpuFrame->data[1] + cpuFrame->linesize[1] / 2 * i;
+					void* destPtr = pixels + pitch / 2 * i;
+					memcpy(destPtr, srcPtr, pitch / 2);
+				}
+
+				SDL_UnlockTexture(texture);
+				av_frame_free(&cpuFrame);
+				
+				auto currentTicks = SDL_GetTicks();
+				int fps = 1000 / vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+				if (currentTicks - fpsTimer < fps) {
+					SDL_Delay(fps - currentTicks + fpsTimer);
+				}
+				fpsTimer = SDL_GetTicks();
 
 				SDL_RenderCopy(renderer, texture, NULL, NULL);
 				SDL_RenderPresent(renderer);
