@@ -3,9 +3,11 @@
 #include <thread>
 #include <chrono>
 #include <Windows.h>
+#include <d3d9.h>
 
 extern "C" {
-#include "SDL.h"
+#include <SDL.h>
+#include <SDL_syswm.h>
 #undef main
 
 #pragma comment(lib, "SDL2.lib")
@@ -42,9 +44,44 @@ void PrintAVErr(int ret) {
 	printf("%s\n", av_make_error_string(errstr, sizeof(errstr), ret));
 }
 
+HWND GetWindowHwnd(SDL_Window* window) {
+	SDL_SysWMinfo wmInfo;
+	SDL_VERSION(&wmInfo.version);
+	SDL_GetWindowWMInfo(window, &wmInfo);
+	HWND hwnd = wmInfo.info.win.window;
+	return hwnd;
+}
+
 void UpdateScreen(SDL_Renderer * renderer, SDL_Texture* texture) {
 	SDL_RenderCopy(renderer, texture, NULL, NULL);
 	SDL_RenderPresent(renderer);
+}
+
+void UpdateScreen(HWND hwnd, AVFrame* frame) {
+	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
+	IDirect3DDevice9* d3d9device = 0;
+	surface->GetDevice(&d3d9device);
+
+	IDirect3DSwapChain9* swap;
+	d3d9device->GetSwapChain(0, &swap);
+	D3DPRESENT_PARAMETERS params;
+	swap->GetPresentParameters(&params);
+
+	if (params.hDeviceWindow != hwnd) {
+		D3DPRESENT_PARAMETERS presentParams = {};
+		presentParams.hDeviceWindow = hwnd;
+		presentParams.SwapEffect = D3DSWAPEFFECT_FLIP;
+		presentParams.Windowed = TRUE;
+		d3d9device->Reset(&presentParams);
+	}
+
+	IDirect3DSurface9* backSurface = 0;
+	d3d9device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backSurface);
+	
+	d3d9device->StretchRect(surface, NULL, backSurface, NULL, D3DTEXF_LINEAR);
+	backSurface->Release();
+
+	d3d9device->Present(NULL, NULL, hwnd, NULL);
 }
 
 void UpdateTexture(AVFrame* frame, SDL_Texture* texture) {
@@ -87,12 +124,11 @@ int main(int argc, char** argv)
 		SDL_WINDOW_RESIZABLE
 	);
 
-	auto renderer = SDL_CreateRenderer(window, -1, SDL_RendererFlags::SDL_RENDERER_PRESENTVSYNC); // alloc
+	HWND hwnd = GetWindowHwnd(window);
 
-	// auto bmp = SDL_LoadBMP("C:\\Users\\ouzian\\Pictures\\Anime\\1.bmp"); // alloc
-	SDL_Texture* texture = 0;
+	// auto renderer = SDL_CreateRenderer(window, -1, SDL_RendererFlags::SDL_RENDERER_PRESENTVSYNC); // alloc
 
-	// memcpy(pixels, bmp->pixels, bmp->pitch * bmp->h);
+	// SDL_Texture* texture = 0;
 
 	// 打开视频容器
 	AVFormatContext* avfCtx = 0;
@@ -123,7 +159,7 @@ int main(int argc, char** argv)
 			vcodecCtx->hw_device_ctx = hw_device;
 
 			// 创建对应的纹理
-			texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_NV12, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
+			// texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_NV12, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
 			SDL_SetWindowSize(window, 1280, 720);
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 		}
@@ -166,27 +202,17 @@ int main(int argc, char** argv)
 				continue;
 			}
 			else if (ret == 0) {
-				decodeCount++;
 
-				while (1) {
-					double ratioCount = (double)presentCount / decodeCount;
-					double ratioRate = refreshRate / frameRate;
-
-					if (frameRate <= refreshRate && ratioCount >= ratioRate) {
-						UpdateTexture(frame, texture);
-						UpdateScreen(renderer, texture);
-						presentCount++;
-						break;
-					}
-					else if (ratioCount < ratioRate) {
-						UpdateScreen(renderer, texture);
-						presentCount++;
-					}
-					else if (frameRate > refreshRate && ratioCount >= ratioRate) {
-						break;
-					}
+				auto currentTicks = SDL_GetTicks();
+				int fps = 1000 / ((double)vcodecCtx->framerate.num / vcodecCtx->framerate.den);
+				if (currentTicks - fpsTimer < fps) {
+					SDL_Delay(fps - currentTicks + fpsTimer);
 				}
+				fpsTimer = SDL_GetTicks();
 
+				// UpdateTexture(frame, texture);
+				// UpdateScreen(renderer, texture);
+				UpdateScreen(hwnd, frame);
 			}
 			else {
 				PrintAVErr(ret);
@@ -200,6 +226,6 @@ int main(int argc, char** argv)
 	avcodec_free_context(&vcodecCtx);
 	avformat_close_input(&avfCtx);
 
-	SDL_DestroyTexture(texture);
-	SDL_DestroyRenderer(renderer);
+	// SDL_DestroyTexture(texture);
+	// SDL_DestroyRenderer(renderer);
 }
