@@ -116,6 +116,7 @@ void UpdateTexture(AVFrame* frame, SDL_Texture* texture) {
 int main(int argc, char** argv)
 {
 	SetProcessDPIAware();
+	SDL_Init(SDL_INIT_AUDIO);
 
 	int width = 1280;
 	int height = width / (16.0 / 9);
@@ -137,8 +138,12 @@ int main(int argc, char** argv)
 
 	AVRational time_base;
 	int videoStraemIndex = 0;
+	int audioStreamIndex = 0;
 	AVCodecContext* vcodecCtx = nullptr;
+	AVCodecContext* acodecCtx = nullptr;
 	AVBufferRef* hw_device = nullptr;
+	SDL_AudioDeviceID audioDeviceId;
+	SwrContext* audioSwrCtx = nullptr;
 
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
 		// 获取解码器
@@ -162,6 +167,37 @@ int main(int argc, char** argv)
 			// texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_NV12, SDL_TEXTUREACCESS_STREAMING, vcodecCtx->width, vcodecCtx->height);
 			SDL_SetWindowSize(window, 1280, 720);
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+		}
+		// 处理音频
+		else if (codec->type == AVMEDIA_TYPE_AUDIO) {
+			audioStreamIndex = i;
+			acodecCtx = avcodec_alloc_context3(codec);
+			avcodec_parameters_to_context(acodecCtx, avfCtx->streams[i]->codecpar);
+			avcodec_open2(acodecCtx, codec, NULL);
+
+			audioSwrCtx = swr_alloc_set_opts(
+				nullptr,
+				acodecCtx->channel_layout,
+				AV_SAMPLE_FMT_FLT,
+				acodecCtx->sample_rate,
+				acodecCtx->channel_layout,
+				acodecCtx->sample_fmt,
+				acodecCtx->sample_rate,
+				0,
+				0
+			);
+			swr_init(audioSwrCtx);
+
+			SDL_AudioSpec spec = {};
+			spec.freq = acodecCtx->sample_rate;
+			spec.format = AUDIO_F32SYS;
+			spec.channels = acodecCtx->channels;
+			spec.silence = 0;
+			spec.samples = 4096;
+			SDL_AudioSpec obt = {};
+			audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &spec, &obt, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+
+			SDL_PauseAudioDevice(audioDeviceId, 0);
 		}
 	}
 
@@ -219,12 +255,37 @@ int main(int argc, char** argv)
 			}
 			av_frame_free(&frame);
 		}
+		else if (packet->stream_index == audioStreamIndex) {
+			int ret = avcodec_send_packet(acodecCtx, packet);
+			if (ret != 0) {
+				PrintAVErr(ret);
+			}
+
+			AVFrame* frame = av_frame_alloc();
+			ret = avcodec_receive_frame(acodecCtx, frame);
+			
+			if (ret == AVERROR(EAGAIN)) { // 数据包不够，再拿
+				continue;
+			}
+			else if (ret == 0) {
+				uint8_t* buffer = new uint8_t[frame->nb_samples * 2 * 4];
+				auto sampleNum = swr_convert(audioSwrCtx, &buffer, frame->nb_samples, (const uint8_t**)frame->extended_data, frame->nb_samples);
+				SDL_QueueAudio(audioDeviceId, buffer, sampleNum * 2 * 4);
+				delete[] buffer;
+			}
+			
+			av_frame_free(&frame);
+		}
 
 		av_packet_unref(packet);
 	}
 
+	swr_free(&audioSwrCtx);
 	avcodec_free_context(&vcodecCtx);
+	avcodec_free_context(&acodecCtx);
 	avformat_close_input(&avfCtx);
+
+	SDL_CloseAudioDevice(audioDeviceId);
 
 	// SDL_DestroyTexture(texture);
 	// SDL_DestroyRenderer(renderer);
