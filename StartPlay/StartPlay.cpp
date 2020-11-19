@@ -67,9 +67,10 @@ void UpdateScreen(HWND hwnd, AVFrame* frame) {
 	D3DPRESENT_PARAMETERS params;
 	swap->GetPresentParameters(&params);
 
-	if (params.hDeviceWindow != hwnd) {
+	if (params.BackBufferWidth != frame->width) {
 		D3DPRESENT_PARAMETERS presentParams = {};
-		presentParams.hDeviceWindow = hwnd;
+		presentParams.BackBufferWidth = frame->width;
+		presentParams.BackBufferHeight = frame->height;
 		presentParams.SwapEffect = D3DSWAPEFFECT_FLIP;
 		presentParams.Windowed = TRUE;
 		d3d9device->Reset(&presentParams);
@@ -268,9 +269,9 @@ int main(int argc, char** argv)
 				continue;
 			}
 			else if (ret == 0) {
-				uint8_t* buffer = new uint8_t[frame->nb_samples * 2 * 4];
+				uint8_t* buffer = new uint8_t[frame->nb_samples * frame->channels * 4];
 				auto sampleNum = swr_convert(audioSwrCtx, &buffer, frame->nb_samples, (const uint8_t**)frame->extended_data, frame->nb_samples);
-				SDL_QueueAudio(audioDeviceId, buffer, sampleNum * 2 * 4);
+				SDL_QueueAudio(audioDeviceId, buffer, sampleNum * frame->channels * 4);
 				delete[] buffer;
 			}
 			
