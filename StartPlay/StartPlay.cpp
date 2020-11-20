@@ -1,5 +1,6 @@
 ﻿#include <stdio.h>
 #include <vector>
+#include <string>
 #include <thread>
 #include <chrono>
 #include <Windows.h>
@@ -232,24 +233,43 @@ int main(int argc, char** argv)
 
 	SDL_DisplayMode displayMode;
 	SDL_GetDisplayMode(0, 0, &displayMode);
-	double refreshRate = displayMode.refresh_rate;
-	double frameRate = refreshRate;
-	uint64_t presentCount = 1;
-	uint64_t decodeCount = 0;
-
+	double frameRate = displayMode.refresh_rate;
 	Uint32 fpsTimer = 0;
+
+	int audioVolume = SDL_MIX_MAXVOLUME / 2;
+
 	SDL_Event event;
 	while (1) {
-		SDL_PollEvent(&event);
+		if (SDL_PollEvent(&event)) {
+			if (event.type == SDL_QUIT) {
+				break;
+			}
 
-		if (event.type == SDL_QUIT) {
-			break;
-		}
+			if (event.type == SDL_KEYUP) {
+				if (event.key.keysym.sym == 13) {
+					static int flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+					SDL_SetWindowFullscreen(window, flag);
+					flag = flag == 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+				}
+			}
 
-		if (event.type == SDL_KEYUP && event.key.keysym.sym == 13) {
-			static int flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-			SDL_SetWindowFullscreen(window, flag);
-			flag = flag == 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+			if (event.type == SDL_MOUSEWHEEL) {
+				if (event.wheel.y > 0) {
+					audioVolume += 2;
+				}
+				else if (event.wheel.y < 0) {
+					audioVolume -= 2;
+				}
+
+				if (audioVolume > SDL_MIX_MAXVOLUME) {
+					audioVolume = SDL_MIX_MAXVOLUME;
+				}
+				else if (audioVolume < 0) {
+					audioVolume = 0;
+				}
+			}
+
+			SDL_SetWindowTitle(window, std::to_string(audioVolume).c_str());
 		}
 
 		// 读取数据包
@@ -304,10 +324,19 @@ int main(int argc, char** argv)
 				continue;
 			}
 			else if (ret == 0) {
-				uint8_t* buffer = new uint8_t[frame->nb_samples * frame->channels * 4];
+				constexpr int SAMPLE_SIZE = 4;
+				int SAMPLE_NB = frame->nb_samples * frame->channels;
+				int SAMPLE_BYTES = SAMPLE_NB * SAMPLE_SIZE;
+				uint8_t* buffer = new uint8_t[SAMPLE_BYTES];
+				uint8_t* destBuffer = new uint8_t[SAMPLE_BYTES];
+				memset(destBuffer, 0, SAMPLE_BYTES);
+
 				auto sampleNum = swr_convert(audioSwrCtx, &buffer, frame->nb_samples, (const uint8_t**)frame->extended_data, frame->nb_samples);
-				SDL_QueueAudio(audioDeviceId, buffer, sampleNum * frame->channels * 4);
+				
+				SDL_MixAudioFormat(destBuffer, buffer, AUDIO_F32SYS, SAMPLE_BYTES, audioVolume);
+				SDL_QueueAudio(audioDeviceId, destBuffer, SAMPLE_BYTES);
 				delete[] buffer;
+				delete[] destBuffer;
 			}
 			
 			av_frame_free(&frame);
