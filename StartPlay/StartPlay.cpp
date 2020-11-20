@@ -231,9 +231,6 @@ int main(int argc, char** argv)
 		}
 	}
 
-	SDL_DisplayMode displayMode;
-	SDL_GetDisplayMode(0, 0, &displayMode);
-	double frameRate = displayMode.refresh_rate;
 	Uint32 fpsTimer = 0;
 
 	int audioVolume = SDL_MIX_MAXVOLUME / 2;
@@ -279,8 +276,6 @@ int main(int argc, char** argv)
 		if (packet->stream_index == videoStraemIndex) {
 			// 发送给解码器
 			int ret = avcodec_send_packet(vcodecCtx, packet);
-			frameRate = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
-			auto timebase = (double)vcodecCtx->time_base.num / vcodecCtx->time_base.den;
 
 			if (ret != 0) {
 				PrintAVErr(ret);
