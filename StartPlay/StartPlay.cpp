@@ -88,11 +88,17 @@ void UpdateScreen(HWND hwnd, AVFrame* frame) {
 	RECT backRect = { 0, 0 };
 	if (srcRatio < destRatio) {
 		backRect.bottom = rect.bottom;
-		backRect.right = rect.bottom * srcRatio;
+		auto newWidth = rect.bottom * srcRatio;
+		auto offset = rect.right - newWidth;
+		backRect.right = newWidth + offset / 2;
+		backRect.left = offset / 2;
 	}
 	else if (srcRatio > destRatio) {
 		backRect.right = rect.right;
-		backRect.bottom = rect.right / srcRatio;
+		auto newHeight = rect.right / srcRatio;
+		auto offset = rect.bottom - newHeight;
+		backRect.bottom = newHeight + offset / 2;
+		backRect.top = offset / 2;
 	}
 	else {
 		backRect.bottom = rect.bottom;
