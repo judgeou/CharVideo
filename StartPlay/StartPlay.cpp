@@ -255,10 +255,10 @@ int main(int argc, char** argv)
 
 			if (event.type == SDL_MOUSEWHEEL) {
 				if (event.wheel.y > 0) {
-					audioVolume += 2;
+					audioVolume += 4;
 				}
 				else if (event.wheel.y < 0) {
-					audioVolume -= 2;
+					audioVolume -= 4;
 				}
 
 				if (audioVolume > SDL_MIX_MAXVOLUME) {
