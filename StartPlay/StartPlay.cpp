@@ -67,10 +67,13 @@ void UpdateScreen(HWND hwnd, AVFrame* frame) {
 	D3DPRESENT_PARAMETERS params;
 	swap->GetPresentParameters(&params);
 
-	if (params.BackBufferWidth != frame->width) {
+	RECT rect;
+	GetClientRect(hwnd, &rect);
+
+	if (params.BackBufferWidth != rect.right || params.BackBufferHeight != rect.bottom) {
 		D3DPRESENT_PARAMETERS presentParams = {};
-		presentParams.BackBufferWidth = frame->width;
-		presentParams.BackBufferHeight = frame->height;
+		presentParams.BackBufferWidth = rect.right;
+		presentParams.BackBufferHeight = rect.bottom;
 		presentParams.SwapEffect = D3DSWAPEFFECT_FLIP;
 		presentParams.Windowed = TRUE;
 		d3d9device->Reset(&presentParams);
@@ -78,8 +81,25 @@ void UpdateScreen(HWND hwnd, AVFrame* frame) {
 
 	IDirect3DSurface9* backSurface = 0;
 	d3d9device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backSurface);
+
+	double srcRatio = (double)frame->width / frame->height;
+	double destRatio = (double)rect.right / rect.bottom;
+
+	RECT backRect = { 0, 0 };
+	if (srcRatio < destRatio) {
+		backRect.bottom = rect.bottom;
+		backRect.right = rect.bottom * srcRatio;
+	}
+	else if (srcRatio > destRatio) {
+		backRect.right = rect.right;
+		backRect.bottom = rect.right / srcRatio;
+	}
+	else {
+		backRect.bottom = rect.bottom;
+		backRect.right = rect.right;
+	}
 	
-	d3d9device->StretchRect(surface, NULL, backSurface, NULL, D3DTEXF_LINEAR);
+	d3d9device->StretchRect(surface, NULL, backSurface, &backRect, D3DTEXF_LINEAR);
 	backSurface->Release();
 
 	d3d9device->Present(NULL, NULL, hwnd, NULL);
@@ -149,7 +169,9 @@ int main(int argc, char** argv)
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
 		// 获取解码器
 		AVCodec* codec = avcodec_find_decoder(avfCtx->streams[i]->codecpar->codec_id);
-
+		if (codec == 0) {
+			continue;
+		}
 		// 处理视频
 		if (codec->type == AVMEDIA_TYPE_VIDEO) {
 			// 获取解码环境
@@ -218,6 +240,12 @@ int main(int argc, char** argv)
 			break;
 		}
 
+		if (event.type == SDL_KEYUP && event.key.keysym.sym == 13) {
+			static int flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+			SDL_SetWindowFullscreen(window, flag);
+			flag = flag == 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+		}
+
 		// 读取数据包
 		AVPacket* packet = av_packet_alloc();
 		av_read_frame(avfCtx, packet);
@@ -226,6 +254,7 @@ int main(int argc, char** argv)
 			// 发送给解码器
 			int ret = avcodec_send_packet(vcodecCtx, packet);
 			frameRate = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+			auto timebase = (double)vcodecCtx->time_base.num / vcodecCtx->time_base.den;
 
 			if (ret != 0) {
 				PrintAVErr(ret);
