@@ -3,11 +3,11 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LocalDebuggerWorkingDirectory>./bin</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArguments>"F:\Video\bbl.flv"</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>"F:\Video\dance.flv"</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LocalDebuggerWorkingDirectory>./bin</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArguments>"F:\Video\bbl.flv"</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>"F:\Video\dance.flv"</LocalDebuggerCommandArguments>
   </PropertyGroup>
 </Project>
