@@ -7,29 +7,32 @@
 #include <d3d9.h>
 
 extern "C" {
+#pragma comment(lib, "Winmm.lib")
+#pragma comment(lib, "Version.lib")
+#pragma comment(lib, "Imm32.lib")
+#pragma comment(lib, "Setupapi.lib")
+
 #include <SDL.h>
 #include <SDL_syswm.h>
 #undef main
-
 #pragma comment(lib, "SDL2.lib")
 }
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#pragma comment(lib, "avcodec.lib")
+#pragma comment(lib, "libavcodec.a")
 
 #include <libavformat/avformat.h>
-#pragma comment(lib, "avformat.lib")
+#pragma comment(lib, "libavformat.a")
 
 #include <libavutil/imgutils.h>
-#pragma comment(lib, "avutil.lib")
-
-#include <libswscale/swscale.h>
-#pragma comment(lib, "swscale.lib")
+#pragma comment(lib, "libavutil.a")
 
 #include <libswresample/swresample.h>
-#pragma comment(lib, "swresample.lib")
+#pragma comment(lib, "libswresample.a")
 }
+
+#pragma comment(lib, "Bcrypt.lib")
 
 using std::vector;
 using namespace std::chrono;
