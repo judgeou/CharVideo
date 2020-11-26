@@ -7,29 +7,32 @@
 #include <d3d9.h>
 
 extern "C" {
+#pragma comment(lib, "Winmm.lib")
+#pragma comment(lib, "Version.lib")
+#pragma comment(lib, "Imm32.lib")
+#pragma comment(lib, "Setupapi.lib")
+
 #include <SDL.h>
 #include <SDL_syswm.h>
 #undef main
-
 #pragma comment(lib, "SDL2.lib")
 }
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#pragma comment(lib, "avcodec.lib")
+#pragma comment(lib, "libavcodec.a")
 
 #include <libavformat/avformat.h>
-#pragma comment(lib, "avformat.lib")
+#pragma comment(lib, "libavformat.a")
 
 #include <libavutil/imgutils.h>
-#pragma comment(lib, "avutil.lib")
-
-#include <libswscale/swscale.h>
-#pragma comment(lib, "swscale.lib")
+#pragma comment(lib, "libavutil.a")
 
 #include <libswresample/swresample.h>
-#pragma comment(lib, "swresample.lib")
+#pragma comment(lib, "libswresample.a")
 }
+
+#pragma comment(lib, "Bcrypt.lib")
 
 using std::vector;
 using namespace std::chrono;
@@ -60,6 +63,9 @@ void UpdateScreen(SDL_Renderer * renderer, SDL_Texture* texture) {
 
 void UpdateScreen(HWND hwnd, AVFrame* frame) {
 	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
+	if (surface == 0) {
+		return;
+	}
 	IDirect3DDevice9* d3d9device = 0;
 	surface->GetDevice(&d3d9device);
 
@@ -172,6 +178,7 @@ int main(int argc, char** argv)
 	AVBufferRef* hw_device = nullptr;
 	SDL_AudioDeviceID audioDeviceId;
 	SwrContext* audioSwrCtx = nullptr;
+	AVFrame* frame = av_frame_alloc();
 
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
 		// 获取解码器
@@ -234,10 +241,19 @@ int main(int argc, char** argv)
 	Uint32 fpsTimer = 0;
 
 	int audioVolume = SDL_MIX_MAXVOLUME / 2;
+	bool isPause = false;
 
 	SDL_Event event;
 	while (1) {
-		if (SDL_PollEvent(&event)) {
+		int event_state;
+		if (isPause) {
+			event_state = SDL_WaitEvent(&event);
+		}
+		else {
+			event_state = SDL_PollEvent(&event);
+		}
+
+		if (event_state) {
 			if (event.type == SDL_QUIT) {
 				break;
 			}
@@ -247,6 +263,9 @@ int main(int argc, char** argv)
 					static int flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
 					SDL_SetWindowFullscreen(window, flag);
 					flag = flag == 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+				}
+				else if (event.key.keysym.sym == SDLK_SPACE) {
+					isPause = !isPause;
 				}
 			}
 
@@ -269,6 +288,11 @@ int main(int argc, char** argv)
 			SDL_SetWindowTitle(window, std::to_string(audioVolume).c_str());
 		}
 
+		if (isPause) {
+			UpdateScreen(hwnd, frame);
+			continue;
+		}
+
 		// 读取数据包
 		AVPacket* packet = av_packet_alloc();
 		av_read_frame(avfCtx, packet);
@@ -282,7 +306,7 @@ int main(int argc, char** argv)
 			}
 
 			// 从解码器获取解码后的帧
-			AVFrame* frame = av_frame_alloc();
+
 			ret = avcodec_receive_frame(vcodecCtx, frame);
 
 			if (ret == AVERROR(EAGAIN)) { // 数据包不够，再拿
@@ -304,7 +328,7 @@ int main(int argc, char** argv)
 			else {
 				PrintAVErr(ret);
 			}
-			av_frame_free(&frame);
+
 		}
 		else if (packet->stream_index == audioStreamIndex) {
 			int ret = avcodec_send_packet(acodecCtx, packet);
@@ -340,6 +364,7 @@ int main(int argc, char** argv)
 		av_packet_unref(packet);
 	}
 
+	av_frame_free(&frame);
 	swr_free(&audioSwrCtx);
 	avcodec_free_context(&vcodecCtx);
 	avcodec_free_context(&acodecCtx);
