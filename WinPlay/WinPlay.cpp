@@ -40,10 +40,10 @@ struct AudioDataBuffer {
 	int read;
 };
 
-void UpdateScreen(HWND hwnd, AVFrame* frame) {
+IDirect3DDevice9* UpdateScreen(HWND hwnd, AVFrame* frame) {
 	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
 	if (surface == 0) {
-		return;
+		return 0;
 	}
 	IDirect3DDevice9* d3d9device = 0;
 	surface->GetDevice(&d3d9device);
@@ -94,8 +94,16 @@ void UpdateScreen(HWND hwnd, AVFrame* frame) {
 		auto ret = d3d9device->StretchRect(surface, NULL, backSurface, &backRect, D3DTEXF_LINEAR);
 		backSurface->Release();
 
-		ret = d3d9device->Present(NULL, NULL, hwnd, NULL);
+		// ret = d3d9device->Present(NULL, NULL, hwnd, NULL);
+		return d3d9device;
 	}
+	else {
+		return 0;
+	}
+}
+
+void UpdatePresent(HWND hwnd, IDirect3DDevice9* d3d9device) {
+	if (d3d9device) d3d9device->Present(NULL, NULL, hwnd, NULL);
 }
 
 int main(int argc, char** argv)
@@ -300,9 +308,9 @@ int main(int argc, char** argv)
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-		UpdateScreen(hwnd, videoFrame);
-
+		auto d3d9device = UpdateScreen(hwnd, videoFrame);
 		cond_decode.notify_all();
+		UpdatePresent(hwnd, d3d9device);
 	}
 
 	ma_device_uninit(&device);
