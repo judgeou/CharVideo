@@ -46,7 +46,10 @@ int main(int argc, char** argv)
 	static unique_lock<mutex> mlock(mutex_);
 
 	static int audioStreamIndex = -1;
+	static int videoStraemIndex = -1;
 	static AVCodecContext* acodecCtx = nullptr;
+	static AVCodecContext* vcodecCtx = nullptr;
+	AVBufferRef* hw_device = nullptr;
 
 	// 打开视频容器
 	static AVFormatContext* avfCtx = 0;
@@ -63,6 +66,17 @@ int main(int argc, char** argv)
 			acodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(acodecCtx, avfCtx->streams[i]->codecpar);
 			avcodec_open2(acodecCtx, codec, NULL);
+		}
+		else if (codec->type == AVMEDIA_TYPE_VIDEO) {
+			videoStraemIndex = i;
+			vcodecCtx = avcodec_alloc_context3(codec);
+			avcodec_parameters_to_context(vcodecCtx, avfCtx->streams[i]->codecpar);
+			avcodec_open2(vcodecCtx, codec, NULL);
+
+			// hw
+			hw_device = 0;
+			av_hwdevice_ctx_create(&hw_device, AVHWDeviceType::AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, NULL);
+			vcodecCtx->hw_device_ctx = hw_device;
 		}
 	}
 
@@ -134,6 +148,25 @@ int main(int argc, char** argv)
 						break;
 					}
 				}
+				else if (packet->stream_index == videoStraemIndex) {
+					int ret = avcodec_send_packet(vcodecCtx, packet);
+					if (ret != 0) {
+						PrintAVErr(ret);
+					}
+
+					AVFrame* frame = av_frame_alloc();
+					ret = avcodec_receive_frame(vcodecCtx, frame);
+
+					if (ret == AVERROR(EAGAIN)) {
+						// 数据包不够，再拿
+						av_frame_free(&frame);
+					}
+					else if (ret == 0) {
+						av_frame_free(&frame);
+						av_packet_free(&packet);
+						break;
+					}
+				}
 
 				av_packet_free(&packet);
 			}
@@ -157,6 +190,7 @@ int main(int argc, char** argv)
 		cond_.wait(mlock);
 	}
 
+	avcodec_free_context(&vcodecCtx);
 	avcodec_free_context(&acodecCtx);
 	avformat_close_input(&avfCtx);
 
