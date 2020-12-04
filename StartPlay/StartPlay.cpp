@@ -340,7 +340,7 @@ int main(int argc, char** argv)
 			ret = avcodec_receive_frame(acodecCtx, frame);
 			
 			if (ret == AVERROR(EAGAIN)) { // 数据包不够，再拿
-				continue;
+
 			}
 			else if (ret == 0) {
 				constexpr int SAMPLE_SIZE = 4;
@@ -361,7 +361,7 @@ int main(int argc, char** argv)
 			av_frame_free(&frame);
 		}
 
-		av_packet_unref(packet);
+		av_packet_free(&packet);
 	}
 
 	av_frame_free(&frame);
