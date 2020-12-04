@@ -24,6 +24,8 @@ extern "C" {
 }
 
 #define MINIAUDIO_IMPLEMENTATION
+#define MA_NO_DECODING
+#define MA_NO_ENCODING
 #include "miniaudio.h"
 
 void PrintAVErr(int ret) {
@@ -68,8 +70,10 @@ int main(int argc, char** argv)
 	audioDataBuffer.read = 0;
 
 	static map<AVSampleFormat, ma_format> ma_format_map = {
-	{ AV_SAMPLE_FMT_S16, ma_format_s16 },
-	{ AV_SAMPLE_FMT_S32, ma_format_s32 }
+		{ AV_SAMPLE_FMT_S16, ma_format_s16 },
+		{ AV_SAMPLE_FMT_S32, ma_format_s32 },
+		{ AV_SAMPLE_FMT_FLT, ma_format_f32 },
+		{ AV_SAMPLE_FMT_FLTP, ma_format_f32 }
 	};
 	ma_device_config config = ma_device_config_init(ma_device_type_playback);
 	config.playback.format = ma_format_map[acodecCtx->sample_fmt];   // Set to ma_format_unknown to use the device's native format.
@@ -80,7 +84,7 @@ int main(int argc, char** argv)
 		auto audioDataBuffer = (AudioDataBuffer*)pDevice->pUserData;
 		auto& data = audioDataBuffer->data;
 
-		if (size > data.size()) {
+		while (size > data.size()) {
 			while (1) {
 				AVPacket* packet = av_packet_alloc();
 				int ret = av_read_frame(avfCtx, packet);
@@ -107,7 +111,23 @@ int main(int argc, char** argv)
 					}
 					else if (ret == 0) {
 						// 解码成功
-						data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
+						if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
+							// Planer
+							auto nb = frame->nb_samples * frame->channels;
+							auto newData = new float[nb];
+							auto left = (float*)frame->data[0];
+							auto right = (float*)frame->data[1];
+							for (int i = 0; i < frame->nb_samples; i++) {
+								int p = i * 2;
+								newData[p] = left[i];
+								newData[p + 1] = right[i];
+							}
+							data.insert(data.end(), (uint8_t*)newData, (uint8_t*)newData + nb * 4);
+							delete[] newData;
+						}
+						else {
+							data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
+						}
 
 						av_frame_free(&frame);
 						av_packet_free(&packet);
