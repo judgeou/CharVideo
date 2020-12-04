@@ -1,10 +1,14 @@
 ﻿#include <stdio.h>
 #include <vector>
 #include <map>
-#include "SharedQueue.h"
+#include <mutex>
+#include <condition_variable>
 
 using std::map;
 using std::vector;
+using std::mutex;
+using std::condition_variable;
+using std::unique_lock;
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -34,6 +38,11 @@ struct AudioDataBuffer {
 
 int main(int argc, char** argv)
 {
+	static bool isPlay = true;
+	static mutex mutex_;
+	static condition_variable cond_;
+	static unique_lock<mutex> mlock(mutex_);
+
 	static int audioStreamIndex = -1;
 	static AVCodecContext* acodecCtx = nullptr;
 
@@ -78,7 +87,8 @@ int main(int argc, char** argv)
 
 				if (ret != 0) {
 					// 结束播放
-					ma_device_uninit(pDevice);    // This will stop the device so no need to do that manually.
+					isPlay = false;
+					cond_.notify_all();
 					return;
 				}
 
@@ -123,9 +133,9 @@ int main(int argc, char** argv)
 
 	ma_device_start(&device);     // The device is sleeping by default so you'll need to start it manually.
 
-	getchar();
-
-
+	while (isPlay) {
+		cond_.wait(mlock);
+	}
 
 	avcodec_free_context(&acodecCtx);
 	avformat_close_input(&avfCtx);
