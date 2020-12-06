@@ -1,16 +1,19 @@
 ﻿#include <stdio.h>
 #include <vector>
 #include <map>
+#include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <Windows.h>
 #include <d3d9.h>
+#include "SharedQueue.h"
 
 using std::map;
 using std::vector;
 using std::mutex;
 using std::condition_variable;
 using std::unique_lock;
+using std::thread;
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -110,20 +113,11 @@ int main(int argc, char** argv)
 {
 	static bool isPlay = true;
 
-	static mutex mutex_update;
-	static condition_variable cond_update;
-	// static unique_lock<mutex> mlock_update(mutex_update);
-
-	static mutex mutex_decode;
-	static condition_variable cond_decode;
-	// static unique_lock<mutex> mlock_decode(mutex_decode);
-
 	static int audioStreamIndex = -1;
 	static int videoStraemIndex = -1;
 	static AVCodecContext* acodecCtx = nullptr;
 	static AVCodecContext* vcodecCtx = nullptr;
 	AVBufferRef* hw_device = nullptr;
-	static AVFrame* videoFrame = 0;
 
 	// 打开视频容器
 	static AVFormatContext* avfCtx = 0;
@@ -155,6 +149,60 @@ int main(int argc, char** argv)
 	}
 
 	AudioDataBuffer audioDataBuffer;
+	static SharedQueue<AVFrame*> videoQueue;
+	static SharedQueue<AVFrame*> audioQueue;
+
+	auto tDecode = thread([]() {
+		while (isPlay) {
+			AVPacket* packet = av_packet_alloc();
+			int ret = av_read_frame(avfCtx, packet);
+
+			if (ret != 0) {
+				// 结束播放
+				isPlay = false;
+				return;
+			}
+
+			if (packet->stream_index == audioStreamIndex) {
+				int ret = avcodec_send_packet(acodecCtx, packet);
+				if (ret != 0) {
+					PrintAVErr(ret);
+				}
+
+				AVFrame* frame = av_frame_alloc();
+				ret = avcodec_receive_frame(acodecCtx, frame);
+
+				if (ret == AVERROR(EAGAIN)) {
+					// 数据包不够，再拿
+					av_frame_free(&frame);
+				}
+				else if (ret == 0) {
+					// 解码成功
+					audioQueue.push_back(frame);
+				}
+			}
+			else if (packet->stream_index == videoStraemIndex) {
+				int ret = avcodec_send_packet(vcodecCtx, packet);
+				if (ret != 0) {
+					PrintAVErr(ret);
+				}
+
+				AVFrame* frame = av_frame_alloc();
+				ret = avcodec_receive_frame(vcodecCtx, frame);
+
+				if (ret == AVERROR(EAGAIN)) {
+					// 数据包不够，再拿
+					av_frame_free(&frame);
+				}
+				else if (ret == 0) {
+					videoQueue.push_back(frame);
+				}
+			}
+
+			av_packet_free(&packet);
+		}
+
+	});
 
 	static map<AVSampleFormat, ma_format> ma_format_map = {
 		{ AV_SAMPLE_FMT_S16, ma_format_s16 },
@@ -176,81 +224,28 @@ int main(int argc, char** argv)
 		auto& data = audioDataBuffer->data;
 
 		while (size > data.size()) {
-			while (1) {
-				AVPacket* packet = av_packet_alloc();
-				int ret = av_read_frame(avfCtx, packet);
+			auto frame = audioQueue.front();
+			audioQueue.pop_front();
 
-				if (ret != 0) {
-					// 结束播放
-					isPlay = false;
-					return;
+			if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
+				// Planer
+				auto nb = frame->nb_samples * frame->channels;
+				auto newData = new float[nb];
+				auto left = (float*)frame->data[0];
+				auto right = (float*)frame->data[1];
+				for (int i = 0; i < frame->nb_samples; i++) {
+					int p = i * 2;
+					newData[p] = left[i];
+					newData[p + 1] = right[i];
 				}
-
-				if (packet->stream_index == audioStreamIndex) {
-					int ret = avcodec_send_packet(acodecCtx, packet);
-					if (ret != 0) {
-						PrintAVErr(ret);
-					}
-
-					AVFrame* frame = av_frame_alloc();
-					ret = avcodec_receive_frame(acodecCtx, frame);
-
-					if (ret == AVERROR(EAGAIN)) {
-						// 数据包不够，再拿
-						av_frame_free(&frame);
-					}
-					else if (ret == 0) {
-						// 解码成功
-						if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
-							// Planer
-							auto nb = frame->nb_samples * frame->channels;
-							auto newData = new float[nb];
-							auto left = (float*)frame->data[0];
-							auto right = (float*)frame->data[1];
-							for (int i = 0; i < frame->nb_samples; i++) {
-								int p = i * 2;
-								newData[p] = left[i];
-								newData[p + 1] = right[i];
-							}
-							data.insert(data.end(), (uint8_t*)newData, (uint8_t*)newData + nb * 4);
-							delete[] newData;
-						}
-						else {
-							data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
-						}
-
-						av_frame_free(&frame);
-						av_packet_free(&packet);
-						break;
-					}
-				}
-				else if (packet->stream_index == videoStraemIndex) {
-					int ret = avcodec_send_packet(vcodecCtx, packet);
-					if (ret != 0) {
-						PrintAVErr(ret);
-					}
-
-					AVFrame* frame = av_frame_alloc();
-					ret = avcodec_receive_frame(vcodecCtx, frame);
-
-					if (ret == AVERROR(EAGAIN)) {
-						// 数据包不够，再拿
-						av_frame_free(&frame);
-					}
-					else if (ret == 0) {
-						videoFrame = frame;
-						cond_update.notify_all();
-						unique_lock<mutex> mlock_decode(mutex_decode);
-						cond_decode.wait(mlock_decode);
-
-						av_frame_free(&frame);
-						av_packet_free(&packet);
-						break;
-					}
-				}
-
-				av_packet_free(&packet);
+				data.insert(data.end(), (uint8_t*)newData, (uint8_t*)newData + nb * 4);
+				delete[] newData;
 			}
+			else {
+				data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
+			}
+
+			av_frame_free(&frame);
 		}
 
 		memcpy(pOutput, &data[0], size);
@@ -301,19 +296,21 @@ int main(int argc, char** argv)
 
 	MSG msg;
 	while (isPlay) {
-		unique_lock<mutex> mlock_update(mutex_update);
-		cond_update.wait(mlock_update);
-
-		while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE)) {
+		while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE) > 0) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-		auto d3d9device = UpdateScreen(hwnd, videoFrame);
-		cond_decode.notify_all();
+		auto frame = videoQueue.front();
+		videoQueue.pop_front();
+		auto d3d9device = UpdateScreen(hwnd, frame);
+		av_frame_free(&frame);
+
 		UpdatePresent(hwnd, d3d9device);
 	}
 
 	ma_device_uninit(&device);
+
+	tDecode.join();
 
 	avcodec_free_context(&vcodecCtx);
 	avcodec_free_context(&acodecCtx);

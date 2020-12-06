@@ -22,8 +22,12 @@ public:
 
 private:
     std::deque<T> queue_;
+    int sizeLimit = 5;
     std::mutex mutex_;
     std::condition_variable cond_;
+
+    std::mutex mutex_size;
+    std::condition_variable cond_size;
 };
 
 template <typename T>
@@ -52,11 +56,18 @@ void SharedQueue<T>::pop_front()
         cond_.wait(mlock);
     }
     queue_.pop_front();
+    
+    cond_size.notify_one();
 }
 
 template <typename T>
 void SharedQueue<T>::push_back(const T& item)
 {
+    std::unique_lock<std::mutex> mlock_size(mutex_size);
+    while (queue_.size() >= sizeLimit) {
+        cond_size.wait(mlock_size);
+    }
+
     std::unique_lock<std::mutex> mlock(mutex_);
     queue_.push_back(item);
     mlock.unlock();     // unlock before notificiation to minimize mutex con
@@ -67,6 +78,11 @@ void SharedQueue<T>::push_back(const T& item)
 template <typename T>
 void SharedQueue<T>::push_back(T&& item)
 {
+    std::unique_lock<std::mutex> mlock_size(mutex_size);
+    while (queue_.size() >= sizeLimit) {
+        cond_size.wait(mlock_size);
+    }
+
     std::unique_lock<std::mutex> mlock(mutex_);
     queue_.push_back(std::move(item));
     mlock.unlock();     // unlock before notificiation to minimize mutex con
