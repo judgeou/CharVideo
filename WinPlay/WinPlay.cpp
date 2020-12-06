@@ -310,6 +310,8 @@ int main(int argc, char** argv)
 
 	ma_device_uninit(&device);
 
+	audioQueue.clear();
+	videoQueue.clear();
 	tDecode.join();
 
 	avcodec_free_context(&vcodecCtx);

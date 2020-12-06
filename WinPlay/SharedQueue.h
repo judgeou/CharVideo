@@ -13,6 +13,7 @@ public:
 
     T& front();
     void pop_front();
+    void clear();
 
     void push_back(const T& item);
     void push_back(T&& item);
@@ -106,4 +107,12 @@ inline bool SharedQueue<T>::empty()
     auto r = queue_.empty();
     mlock.unlock();
     return r;
+}
+
+template <typename T>
+void SharedQueue<T>::clear()
+{
+    queue_.clear();
+
+    cond_size.notify_one();
 }
