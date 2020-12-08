@@ -8,7 +8,7 @@ template <typename T>
 class SharedQueue
 {
 public:
-    SharedQueue();
+    SharedQueue(int limit = 5);
     ~SharedQueue();
 
     T& front();
@@ -32,7 +32,9 @@ private:
 };
 
 template <typename T>
-SharedQueue<T>::SharedQueue() {}
+SharedQueue<T>::SharedQueue(int limit) {
+    sizeLimit = limit;
+}
 
 template <typename T>
 SharedQueue<T>::~SharedQueue() {}

@@ -149,6 +149,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="miniaudio.h" />
+    <ClInclude Include="RingArray.h" />
+    <ClInclude Include="SafeQueue.h" />
     <ClInclude Include="SharedQueue.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

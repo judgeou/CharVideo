@@ -26,5 +26,11 @@
     <ClInclude Include="SharedQueue.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="SafeQueue.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="RingArray.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

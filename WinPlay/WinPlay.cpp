@@ -7,6 +7,7 @@
 #include <Windows.h>
 #include <d3d9.h>
 #include "SharedQueue.h"
+#include "RingArray.h"
 
 using std::map;
 using std::vector;
@@ -40,7 +41,7 @@ void PrintAVErr(int ret) {
 
 struct AudioDataBuffer {
 	vector<uint8_t> data;
-	int read;
+	int64_t pts;
 };
 
 IDirect3DDevice9* UpdateScreen(HWND hwnd, AVFrame* frame) {
@@ -111,12 +112,16 @@ void UpdatePresent(HWND hwnd, IDirect3DDevice9* d3d9device) {
 
 int main(int argc, char** argv)
 {
+	RingArray<> ra;
+
 	static bool isPlay = true;
 
 	static int audioStreamIndex = -1;
 	static int videoStraemIndex = -1;
 	static AVCodecContext* acodecCtx = nullptr;
 	static AVCodecContext* vcodecCtx = nullptr;
+	static AVRational vtimebase = {};
+	static AVRational atimebase = {};
 	AVBufferRef* hw_device = nullptr;
 
 	// 打开视频容器
@@ -134,12 +139,14 @@ int main(int argc, char** argv)
 			acodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(acodecCtx, avfCtx->streams[i]->codecpar);
 			avcodec_open2(acodecCtx, codec, NULL);
+			atimebase = avfCtx->streams[i]->time_base;
 		}
 		else if (codec->type == AVMEDIA_TYPE_VIDEO) {
 			videoStraemIndex = i;
 			vcodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(vcodecCtx, avfCtx->streams[i]->codecpar);
 			avcodec_open2(vcodecCtx, codec, NULL);
+			vtimebase = avfCtx->streams[i]->time_base;
 
 			// hw
 			hw_device = 0;
@@ -149,8 +156,9 @@ int main(int argc, char** argv)
 	}
 
 	AudioDataBuffer audioDataBuffer;
-	static SharedQueue<AVFrame*> videoQueue;
-	static SharedQueue<AVFrame*> audioQueue;
+	static SharedQueue<AVFrame*> videoQueue(10);
+	static SharedQueue<AVFrame*> audioQueue(50);
+	static SharedQueue<AVFrame*> frameQueue(20);
 
 	auto tDecode = thread([]() {
 		while (isPlay) {
@@ -225,7 +233,6 @@ int main(int argc, char** argv)
 
 		while (size > data.size()) {
 			auto frame = audioQueue.front();
-			audioQueue.pop_front();
 
 			if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
 				// Planer
@@ -245,7 +252,10 @@ int main(int argc, char** argv)
 				data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
 			}
 
+			audioDataBuffer->pts = frame->pts;
+
 			av_frame_free(&frame);
+			audioQueue.pop_front();
 		}
 
 		memcpy(pOutput, &data[0], size);
@@ -282,12 +292,14 @@ int main(int argc, char** argv)
 	};
 	RegisterClassEx(&wc);
 
+	int width = 1270;
+	int height = width / (16.0 / 9);
 	static auto hwnd = CreateWindowEx(
 		NULL,
 		className,
 		L"title",
 		WS_OVERLAPPEDWINDOW,
-		1, 1, 1920, 1080,
+		1, 1, width, height,
 		NULL, NULL, hInstance, NULL
 	);
 	ShowWindow(hwnd, SW_SHOW);
@@ -301,17 +313,26 @@ int main(int argc, char** argv)
 			DispatchMessage(&msg);
 		}
 		auto frame = videoQueue.front();
-		videoQueue.pop_front();
-		auto d3d9device = UpdateScreen(hwnd, frame);
-		av_frame_free(&frame);
 
-		UpdatePresent(hwnd, d3d9device);
+		auto vpts = frame->pts;
+		auto apts = audioDataBuffer.pts;
+
+		auto vt = av_rescale_q(vpts, vtimebase, { 1, 1000 });
+		auto at = av_rescale_q(apts, atimebase, { 1, 1000 });
+
+		printf("%d\n", at - vt);
+
+		if (at - vt > 0) {
+			auto d3d9device = UpdateScreen(hwnd, frame);
+			av_frame_free(&frame);
+			videoQueue.pop_front();
+			UpdatePresent(hwnd, d3d9device);
+		}
 	}
 
-	ma_device_uninit(&device);
+	// ma_device_uninit(&device);
 
 	audioQueue.clear();
-	videoQueue.clear();
 	tDecode.join();
 
 	avcodec_free_context(&vcodecCtx);
