@@ -16,7 +16,6 @@ public:
     void clear();
 
     void push_back(const T& item);
-    void push_back(T&& item);
 
     int size();
     bool empty();
@@ -73,21 +72,6 @@ void SharedQueue<T>::push_back(const T& item)
 
     std::unique_lock<std::mutex> mlock(mutex_);
     queue_.push_back(item);
-    mlock.unlock();     // unlock before notificiation to minimize mutex con
-    cond_.notify_one(); // notify one waiting thread
-
-}
-
-template <typename T>
-void SharedQueue<T>::push_back(T&& item)
-{
-    std::unique_lock<std::mutex> mlock_size(mutex_size);
-    while (queue_.size() >= sizeLimit) {
-        cond_size.wait(mlock_size);
-    }
-
-    std::unique_lock<std::mutex> mlock(mutex_);
-    queue_.push_back(std::move(item));
     mlock.unlock();     // unlock before notificiation to minimize mutex con
     cond_.notify_one(); // notify one waiting thread
 

@@ -292,7 +292,7 @@ int main(int argc, char** argv)
 	};
 	RegisterClassEx(&wc);
 
-	int width = 1270;
+	int width = 1920;
 	int height = width / (16.0 / 9);
 	static auto hwnd = CreateWindowEx(
 		NULL,
@@ -322,12 +322,14 @@ int main(int argc, char** argv)
 
 		printf("%d\n", at - vt);
 
+		auto d3d9device = UpdateScreen(hwnd, frame);
+
 		if (at - vt > 0) {
-			auto d3d9device = UpdateScreen(hwnd, frame);
-			av_frame_free(&frame);
 			videoQueue.pop_front();
-			UpdatePresent(hwnd, d3d9device);
+			av_frame_free(&frame);
 		}
+
+		UpdatePresent(hwnd, d3d9device);
 	}
 
 	// ma_device_uninit(&device);
