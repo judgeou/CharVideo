@@ -157,7 +157,7 @@ int main(int argc, char** argv)
 
 	AudioDataBuffer audioDataBuffer;
 	static SharedQueue<AVFrame*> videoQueue(10);
-	static SharedQueue<AVFrame*> audioQueue(50);
+	static SharedQueue<AVFrame*> audioQueue(5);
 	static SharedQueue<AVFrame*> frameQueue(20);
 
 	auto tDecode = thread([]() {
@@ -319,12 +319,19 @@ int main(int argc, char** argv)
 
 		auto vt = av_rescale_q(vpts, vtimebase, { 1, 1000 });
 		auto at = av_rescale_q(apts, atimebase, { 1, 1000 });
+		auto t = at - vt;
 
-		printf("%d\n", at - vt);
+		printf("%ld\n", t);
+
+		if (t > 100) {
+			videoQueue.pop_front();
+			av_frame_free(&frame);
+			continue;
+		}
 
 		auto d3d9device = UpdateScreen(hwnd, frame);
 
-		if (at - vt > 0) {
+		if (t > 0) {
 			videoQueue.pop_front();
 			av_frame_free(&frame);
 		}
