@@ -25,9 +25,6 @@ private:
     int sizeLimit = 5;
     std::mutex mutex_;
     std::condition_variable cond_;
-
-    std::mutex mutex_size;
-    std::condition_variable cond_size;
 };
 
 template <typename T>
@@ -58,22 +55,21 @@ void SharedQueue<T>::pop_front()
         cond_.wait(mlock);
     }
     queue_.pop_front();
-    
-    cond_size.notify_one();
+    mlock.unlock();
+    cond_.notify_all();
 }
 
 template <typename T>
 void SharedQueue<T>::push_back(const T& item)
 {
-    std::unique_lock<std::mutex> mlock_size(mutex_size);
+    std::unique_lock<std::mutex> mlock(mutex_);
     while (queue_.size() >= sizeLimit) {
-        cond_size.wait(mlock_size);
+        cond_.wait(mlock);
     }
 
-    std::unique_lock<std::mutex> mlock(mutex_);
     queue_.push_back(item);
     mlock.unlock();     // unlock before notificiation to minimize mutex con
-    cond_.notify_one(); // notify one waiting thread
+    cond_.notify_all(); // notify one waiting thread
 
 }
 
@@ -89,16 +85,14 @@ int SharedQueue<T>::size()
 template<typename T>
 inline bool SharedQueue<T>::empty()
 {
-    std::unique_lock<std::mutex> mlock(mutex_);
-    auto r = queue_.empty();
-    mlock.unlock();
-    return r;
+    return queue_.empty();
 }
 
 template <typename T>
 void SharedQueue<T>::clear()
 {
+    std::unique_lock<std::mutex> mlock(mutex_);
     queue_.clear();
-
-    cond_size.notify_one();
+    mlock.unlock();
+    cond_.notify_all();
 }
