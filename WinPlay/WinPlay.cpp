@@ -345,6 +345,21 @@ int main(int argc, char** argv)
 				isPause = !isPause;
 			}
 			break;
+		case WM_MOUSEWHEEL:
+		{
+			float volume = 0;
+			ma_device_get_master_volume(&device, &volume);
+
+			short wheel = HIWORD(wParam);
+			if (wheel > 0) {
+				volume += 0.05;
+			}
+			else {
+				volume -= 0.05;
+			}
+			ma_device_set_master_volume(&device, volume);
+			break;
+		}
 		case WM_DESTROY:
 			isPlay = false;
 			PostQuitMessage(0);
