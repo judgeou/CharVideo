@@ -156,11 +156,11 @@ int main(int argc, char** argv)
 		}
 	}
 
-	AudioDataBuffer audioDataBuffer;
-	static SharedQueue<AVFrame*> videoQueue(10);
-	static SharedQueue<AVFrame*> audioQueue(5);
+	SharedQueue<AVFrame*> videoQueue(10);
+	SharedQueue<AVFrame*> audioQueue(16);
+	static int64_t audioCurrentPTS = 0;
 
-	auto tDecode = thread([]() {
+	auto tDecode = thread([&videoQueue, &audioQueue]() {
 		while (isPlay) {
 			AVPacket* packet = av_packet_alloc();
 			int ret = av_read_frame(avfCtx, packet);
@@ -223,16 +223,18 @@ int main(int argc, char** argv)
 	config.playback.channels = acodecCtx->channels;               // Set to 0 to use the device's native channel count.
 	config.sampleRate = acodecCtx->sample_rate;           // Set to 0 to use the device's native sample rate.
 	config.dataCallback = [](ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+		static AudioDataBuffer audioDataBuffer;
+
 		if (isPlay == false) {
 			return;
 		}
 
 		auto size = frameCount * pDevice->playback.channels * ma_get_bytes_per_sample(pDevice->playback.format);
-		auto audioDataBuffer = (AudioDataBuffer*)pDevice->pUserData;
-		auto& data = audioDataBuffer->data;
+		auto audioQueue = (SharedQueue<AVFrame*>*)pDevice->pUserData;
+		auto& data = audioDataBuffer.data;
 
 		while (size > data.size()) {
-			auto frame = audioQueue.front();
+			auto frame = audioQueue->front();
 
 			if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
 				// Planer
@@ -252,10 +254,10 @@ int main(int argc, char** argv)
 				data.insert(data.end(), frame->data[0], frame->data[0] + frame->linesize[0]);
 			}
 
-			audioDataBuffer->pts = frame->pts;
+			audioCurrentPTS = frame->pts;
 
 			av_frame_free(&frame);
-			audioQueue.pop_front();
+			audioQueue->pop_front();
 		}
 
 		memcpy(pOutput, &data[0], size);
@@ -263,7 +265,7 @@ int main(int argc, char** argv)
 		vector<uint8_t> newData(data.cbegin() + size, data.cend());
 		data = newData;
 	};   // This function will be called when miniaudio needs more data.
-	config.pUserData = &audioDataBuffer;   // Can be accessed from the device object (device.pUserData).
+	config.pUserData = &audioQueue;   // Can be accessed from the device object (device.pUserData).
 
 	static ma_device device;
 	if (ma_device_init(NULL, &config, &device) != MA_SUCCESS) {
@@ -274,6 +276,7 @@ int main(int argc, char** argv)
 	SetProcessDPIAware();
 	auto hInstance = GetModuleHandle(NULL);
 	auto className = L"winplay";
+	static bool isPause = false;
 
 	WNDCLASSEX wc = {};
 	wc.cbSize = sizeof(wc);
@@ -283,6 +286,9 @@ int main(int argc, char** argv)
 		static bool isDrag = false;
 		static int dragStartX = 0;
 		static int dragStartY = 0;
+
+		static bool isScale = false;
+		static int scaleStartY = 0;
 
 		switch (msg) {
 		case WM_MOUSEMOVE:
@@ -301,8 +307,18 @@ int main(int argc, char** argv)
 				auto newY = rect.top + offsetY;
 
 				SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE);
+			}
+			if (isScale) {
+				auto y = GET_Y_LPARAM(lParam);
+				auto offsetY = (y - scaleStartY) * 0.1;
 
-				printf("%d, %d\n", newX, newY);
+				RECT rect;
+				GetWindowRect(hwnd, &rect);
+
+				int newY = rect.bottom - rect.top + offsetY;
+				int newX = newY * ((double)vcodecCtx->width / vcodecCtx->height);
+
+				SetWindowPos(hwnd, HWND_TOP, 0, 0, newX, newY, SWP_NOMOVE);
 			}
 			break;
 		}
@@ -314,8 +330,20 @@ int main(int argc, char** argv)
 		case WM_LBUTTONUP:
 			isDrag = false;
 			break;
+		case WM_RBUTTONDOWN:
+			scaleStartY = GET_Y_LPARAM(lParam);
+			isScale = true;
+			break;
 		case WM_RBUTTONUP:
-			DestroyWindow(hwnd);
+			isScale = false;
+			break;
+		case WM_KEYUP:
+			if (wParam == VK_ESCAPE) {
+				DestroyWindow(hwnd);
+			}
+			else if (wParam == VK_SPACE) {
+				isPause = !isPause;
+			}
 			break;
 		case WM_DESTROY:
 			isPlay = false;
@@ -351,13 +379,13 @@ int main(int argc, char** argv)
 		auto frame = videoQueue.front();
 
 		auto vpts = frame->pts;
-		auto apts = audioDataBuffer.pts;
+		auto apts = audioCurrentPTS;
 
 		auto vt = av_rescale_q(vpts, vtimebase, { 1, 1000 });
 		auto at = av_rescale_q(apts, atimebase, { 1, 1000 });
 		auto t = at - vt;
 
-		if (t > 100) {
+		if (t > 100 && isPause != true) {
 			videoQueue.pop_front();
 			av_frame_free(&frame);
 			continue;
@@ -365,10 +393,12 @@ int main(int argc, char** argv)
 
 		auto d3d9device = UpdateScreen(hwnd, frame);
 
-		if (t > 0) {
+		if (t > -200 && isPause != true) {
 			videoQueue.pop_front();
 			av_frame_free(&frame);
 		}
+
+		// printf("%lld\n", t);
 
 		UpdatePresent(hwnd, d3d9device);
 	}
