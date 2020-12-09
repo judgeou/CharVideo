@@ -5,6 +5,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <Windows.h>
+#include <windowsx.h>
 #include <d3d9.h>
 #include "SharedQueue.h"
 #include "RingArray.h"
@@ -158,7 +159,6 @@ int main(int argc, char** argv)
 	AudioDataBuffer audioDataBuffer;
 	static SharedQueue<AVFrame*> videoQueue(10);
 	static SharedQueue<AVFrame*> audioQueue(5);
-	static SharedQueue<AVFrame*> frameQueue(20);
 
 	auto tDecode = thread([]() {
 		while (isPlay) {
@@ -280,7 +280,43 @@ int main(int argc, char** argv)
 	wc.hInstance = hInstance;
 	wc.lpszClassName = className;
 	wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
+		static bool isDrag = false;
+		static int dragStartX = 0;
+		static int dragStartY = 0;
+
 		switch (msg) {
+		case WM_MOUSEMOVE:
+		{
+			if (isDrag) {
+				auto x = GET_X_LPARAM(lParam);
+				auto y = GET_Y_LPARAM(lParam);
+
+				auto offsetX = x - dragStartX;
+				auto offsetY = y - dragStartY;
+
+				RECT rect;
+				GetWindowRect(hwnd, &rect);
+
+				auto newX = rect.left + offsetX;
+				auto newY = rect.top + offsetY;
+
+				SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE);
+
+				printf("%d, %d\n", newX, newY);
+			}
+			break;
+		}
+		case WM_LBUTTONDOWN:
+			dragStartX = GET_X_LPARAM(lParam);
+			dragStartY = GET_Y_LPARAM(lParam);
+			isDrag = true;
+			break;
+		case WM_LBUTTONUP:
+			isDrag = false;
+			break;
+		case WM_RBUTTONUP:
+			DestroyWindow(hwnd);
+			break;
 		case WM_DESTROY:
 			isPlay = false;
 			PostQuitMessage(0);
@@ -292,13 +328,13 @@ int main(int argc, char** argv)
 	};
 	RegisterClassEx(&wc);
 
-	int width = 1920;
+	int width = 1280;
 	int height = width / (16.0 / 9);
-	static auto hwnd = CreateWindowEx(
+	auto hwnd = CreateWindowEx(
 		NULL,
 		className,
 		L"title",
-		WS_OVERLAPPEDWINDOW,
+		WS_POPUP,
 		1, 1, width, height,
 		NULL, NULL, hInstance, NULL
 	);
@@ -321,8 +357,6 @@ int main(int argc, char** argv)
 		auto at = av_rescale_q(apts, atimebase, { 1, 1000 });
 		auto t = at - vt;
 
-		printf("%ld\n", t);
-
 		if (t > 100) {
 			videoQueue.pop_front();
 			av_frame_free(&frame);
@@ -339,7 +373,7 @@ int main(int argc, char** argv)
 		UpdatePresent(hwnd, d3d9device);
 	}
 
-	// ma_device_uninit(&device);
+	ma_device_uninit(&device);
 
 	audioQueue.clear();
 	tDecode.join();
