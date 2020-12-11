@@ -55,8 +55,8 @@ void SharedQueue<T>::pop_front()
         cond_.wait(mlock);
     }
     queue_.pop_front();
-    mlock.unlock();
     cond_.notify_all();
+    mlock.unlock();
 }
 
 template <typename T>
@@ -68,18 +68,15 @@ void SharedQueue<T>::push_back(const T& item)
     }
 
     queue_.push_back(item);
-    mlock.unlock();     // unlock before notificiation to minimize mutex con
     cond_.notify_all(); // notify one waiting thread
+    mlock.unlock();     // unlock before notificiation to minimize mutex con
 
 }
 
 template <typename T>
 int SharedQueue<T>::size()
 {
-    std::unique_lock<std::mutex> mlock(mutex_);
-    int size = queue_.size();
-    mlock.unlock();
-    return size;
+    return queue_.size();
 }
 
 template<typename T>
@@ -93,6 +90,6 @@ void SharedQueue<T>::clear()
 {
     std::unique_lock<std::mutex> mlock(mutex_);
     queue_.clear();
-    mlock.unlock();
     cond_.notify_all();
+    mlock.unlock();
 }

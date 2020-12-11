@@ -8,7 +8,6 @@
 #include <windowsx.h>
 #include <d3d9.h>
 #include "SharedQueue.h"
-#include "RingArray.h"
 
 using std::map;
 using std::vector;
@@ -65,7 +64,7 @@ IDirect3DDevice9* UpdateScreen(HWND hwnd, AVFrame* frame) {
 		D3DPRESENT_PARAMETERS presentParams = {};
 		presentParams.BackBufferWidth = rect.right;
 		presentParams.BackBufferHeight = rect.bottom;
-		presentParams.SwapEffect = D3DSWAPEFFECT_FLIP;
+		presentParams.SwapEffect = D3DSWAPEFFECT_COPY;
 		presentParams.Windowed = TRUE;
 		d3d9device->Reset(&presentParams);
 	}
@@ -113,8 +112,6 @@ void UpdatePresent(HWND hwnd, IDirect3DDevice9* d3d9device) {
 
 int main(int argc, char** argv)
 {
-	RingArray<> ra;
-
 	static bool isPlay = true;
 
 	static int audioStreamIndex = -1;
