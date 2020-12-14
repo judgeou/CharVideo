@@ -352,13 +352,11 @@ int main(int argc, char** argv)
 	wc.cbSize = sizeof(wc);
 	wc.hInstance = hInstance;
 	wc.lpszClassName = className;
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
 		static bool isDrag = false;
 		static int dragStartX = 0;
 		static int dragStartY = 0;
-
-		static bool isScale = false;
-		static int scaleStartY = 0;
 
 		switch (msg) {
 		case WM_MOUSEMOVE:
@@ -378,18 +376,6 @@ int main(int argc, char** argv)
 
 				SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE);
 			}
-			if (isScale) {
-				auto y = GET_Y_LPARAM(lParam);
-				auto offsetY = (y - scaleStartY) * 0.1;
-
-				RECT rect;
-				GetWindowRect(hwnd, &rect);
-
-				int newY = rect.bottom - rect.top + offsetY;
-				int newX = newY * ((double)vcodecCtx->width / vcodecCtx->height);
-
-				SetWindowPos(hwnd, HWND_TOP, 0, 0, newX, newY, SWP_NOMOVE);
-			}
 			break;
 		}
 		case WM_LBUTTONDOWN:
@@ -399,13 +385,6 @@ int main(int argc, char** argv)
 			break;
 		case WM_LBUTTONUP:
 			isDrag = false;
-			break;
-		case WM_RBUTTONDOWN:
-			scaleStartY = GET_Y_LPARAM(lParam);
-			isScale = true;
-			break;
-		case WM_RBUTTONUP:
-			isScale = false;
 			break;
 		case WM_KEYUP:
 			if (wParam == VK_ESCAPE) {
@@ -417,17 +396,39 @@ int main(int argc, char** argv)
 			break;
 		case WM_MOUSEWHEEL:
 		{
-			float volume = 0;
-			ma_device_get_master_volume(&device, &volume);
+			short mk = LOWORD(wParam);
+			if (mk == MK_CONTROL) {
+				int offset;
+				short wheel = HIWORD(wParam);
+				if (wheel > 0) {
+					offset = 8;
+				}
+				else {
+					offset = -8;
+				}
 
-			short wheel = HIWORD(wParam);
-			if (wheel > 0) {
-				volume += 0.05;
+				RECT rect;
+				GetWindowRect(hwnd, &rect);
+
+				int newY = rect.bottom - rect.top + offset;
+				int newX = newY * ((double)vcodecCtx->width / vcodecCtx->height);
+
+				SetWindowPos(hwnd, HWND_TOP, 0, 0, newX, newY, SWP_NOMOVE);
 			}
 			else {
-				volume -= 0.05;
+				float volume = 0;
+				ma_device_get_master_volume(&device, &volume);
+
+				short wheel = HIWORD(wParam);
+				if (wheel > 0) {
+					volume += 0.05;
+				}
+				else {
+					volume -= 0.05;
+				}
+				ma_device_set_master_volume(&device, volume);
 			}
-			ma_device_set_master_volume(&device, volume);
+
 			break;
 		}
 		case WM_DESTROY:
