@@ -1,4 +1,5 @@
 ﻿#include <stdio.h>
+#include <string>
 #include <vector>
 #include <map>
 #include <thread>
@@ -7,6 +8,8 @@
 #include <Windows.h>
 #include <windowsx.h>
 #include <d3d9.h>
+#include <ShlObj.h>
+#include <wrl.h>
 #include "SharedQueue.h"
 
 using std::map;
@@ -15,6 +18,8 @@ using std::mutex;
 using std::condition_variable;
 using std::unique_lock;
 using std::thread;
+using std::string;
+using std::wstring;
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -43,6 +48,13 @@ struct AudioDataBuffer {
 	vector<uint8_t> data;
 	int64_t pts;
 };
+
+string w2s(const wstring& wstr) {
+	int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
+	string str(len, '\0');
+	WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), &str[0], str.size(), NULL, NULL);
+	return str;
+}
 
 IDirect3DDevice9* UpdateScreen(HWND hwnd, AVFrame* frame) {
 	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
@@ -110,8 +122,41 @@ void UpdatePresent(HWND hwnd, IDirect3DDevice9* d3d9device) {
 	if (d3d9device) d3d9device->Present(NULL, NULL, hwnd, NULL);
 }
 
+std::wstring AskVideoFilePath() {
+	using Microsoft::WRL::ComPtr;
+
+	ComPtr<IFileOpenDialog> fileDialog;
+
+	CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+		IID_IFileOpenDialog, reinterpret_cast<void**>(fileDialog.GetAddressOf()));
+
+	fileDialog->SetTitle(L"选择视频文件");
+
+	COMDLG_FILTERSPEC rgSpec[] =
+	{
+		{ L"Video", L"*.mp4;*.mkv;*.flv;*.flac" },
+	};
+	fileDialog->SetFileTypes(1, rgSpec);
+	fileDialog->Show(NULL);
+
+	ComPtr<IShellItem> list;
+	fileDialog->GetResult(&list);
+
+	if (list.Get()) {
+		PWSTR pszFilePath;
+		list->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+		return pszFilePath;
+	}
+	else {
+		return L"";
+	}
+}
+
 int main(int argc, char** argv)
 {
+	SetProcessDPIAware();
+	CoInitializeEx(NULL, COINIT::COINIT_MULTITHREADED);
+
 	static bool isPlay = true;
 
 	static int audioStreamIndex = -1;
@@ -122,9 +167,17 @@ int main(int argc, char** argv)
 	static AVRational atimebase = {};
 	AVBufferRef* hw_device = nullptr;
 
+	string filePath;
+	if (argc <= 1) {
+		filePath = w2s(AskVideoFilePath());
+	}
+	else {
+		filePath = argv[1];
+	}
+
 	// 打开视频容器
 	static AVFormatContext* avfCtx = 0;
-	avformat_open_input(&avfCtx, argv[1], NULL, NULL);
+	avformat_open_input(&avfCtx, filePath.c_str(), NULL, NULL);
 	avformat_find_stream_info(avfCtx, NULL);
 
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
@@ -292,7 +345,6 @@ int main(int argc, char** argv)
 	}
 
 	// 创建窗口
-	SetProcessDPIAware();
 	auto hInstance = GetModuleHandle(NULL);
 	auto className = L"winplay";
 
