@@ -384,10 +384,16 @@ int main(int argc, char** argv)
 
 	MSG msg;
 	while (isPlay) {
-		while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE) > 0) {
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			printf("%d\n", msg.message);
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
+
+		if (msg.message == WM_QUIT) {
+			break;
+		}
+
 		auto frame = videoQueue.front();
 
 		auto vpts = frame->pts;
