@@ -153,11 +153,14 @@ int main(int argc, char** argv)
 		}
 	}
 
-	SharedQueue<AVFrame*> videoQueue(10);
+	static bool isPause = false;
+
+	SharedQueue<AVFrame*> videoQueue(16);
 	SharedQueue<AVFrame*> audioQueue(16);
+	SharedQueue<AVPacket*> packetQueue(32);
 	static int64_t audioCurrentPTS = 0;
 
-	auto tDecode = thread([&videoQueue, &audioQueue]() {
+	auto tDecode = thread([&packetQueue]() {
 		while (isPlay) {
 			AVPacket* packet = av_packet_alloc();
 			int ret = av_read_frame(avfCtx, packet);
@@ -167,6 +170,18 @@ int main(int argc, char** argv)
 				isPlay = false;
 				return;
 			}
+
+			packetQueue.push_back(packet);
+		}
+
+	});
+
+	std::mutex mutex_requestFrame;
+	auto static requestFrame = [&videoQueue, &audioQueue, &packetQueue, &mutex_requestFrame]() {
+		std::unique_lock<std::mutex> mlock(mutex_requestFrame);
+		while (1) {
+			auto packet = packetQueue.front();
+			packetQueue.pop_front();
 
 			if (packet->stream_index == audioStreamIndex) {
 				int ret = avcodec_send_packet(acodecCtx, packet);
@@ -184,6 +199,8 @@ int main(int argc, char** argv)
 				else if (ret == 0) {
 					// 解码成功
 					audioQueue.push_back(frame);
+					av_packet_free(&packet);
+					break;
 				}
 			}
 			else if (packet->stream_index == videoStraemIndex) {
@@ -201,13 +218,14 @@ int main(int argc, char** argv)
 				}
 				else if (ret == 0) {
 					videoQueue.push_back(frame);
+					av_packet_free(&packet);
+					break;
 				}
 			}
-
+			
 			av_packet_free(&packet);
 		}
-
-	});
+	};
 
 	static map<AVSampleFormat, ma_format> ma_format_map = {
 		{ AV_SAMPLE_FMT_S16, ma_format_s16 },
@@ -222,7 +240,7 @@ int main(int argc, char** argv)
 	config.dataCallback = [](ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
 		static AudioDataBuffer audioDataBuffer;
 
-		if (isPlay == false) {
+		if (isPlay == false || isPause == true) {
 			return;
 		}
 
@@ -231,6 +249,10 @@ int main(int argc, char** argv)
 		auto& data = audioDataBuffer.data;
 
 		while (size > data.size()) {
+			while (audioQueue->size() == 0) {
+				requestFrame();
+			}
+
 			auto frame = audioQueue->front();
 
 			if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
@@ -273,7 +295,6 @@ int main(int argc, char** argv)
 	SetProcessDPIAware();
 	auto hInstance = GetModuleHandle(NULL);
 	auto className = L"winplay";
-	static bool isPause = false;
 
 	WNDCLASSEX wc = {};
 	wc.cbSize = sizeof(wc);
@@ -388,6 +409,10 @@ int main(int argc, char** argv)
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
+
+		while (videoQueue.size() == 0) {
+			requestFrame();
+		}
 		auto frame = videoQueue.front();
 
 		auto vpts = frame->pts;
@@ -418,6 +443,8 @@ int main(int argc, char** argv)
 	ma_device_uninit(&device);
 
 	audioQueue.clear();
+	videoQueue.clear();
+	packetQueue.clear();
 	tDecode.join();
 
 	avcodec_free_context(&vcodecCtx);
