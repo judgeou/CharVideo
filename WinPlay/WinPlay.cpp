@@ -1,4 +1,5 @@
 ﻿#include <stdio.h>
+#include <string>
 #include <vector>
 #include <map>
 #include <thread>
@@ -7,6 +8,8 @@
 #include <Windows.h>
 #include <windowsx.h>
 #include <d3d9.h>
+#include <ShlObj.h>
+#include <wrl.h>
 #include "SharedQueue.h"
 
 using std::map;
@@ -15,6 +18,8 @@ using std::mutex;
 using std::condition_variable;
 using std::unique_lock;
 using std::thread;
+using std::string;
+using std::wstring;
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -43,6 +48,13 @@ struct AudioDataBuffer {
 	vector<uint8_t> data;
 	int64_t pts;
 };
+
+string w2s(const wstring& wstr) {
+	int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
+	string str(len, '\0');
+	WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), &str[0], str.size(), NULL, NULL);
+	return str;
+}
 
 IDirect3DDevice9* UpdateScreen(HWND hwnd, AVFrame* frame) {
 	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
@@ -110,8 +122,41 @@ void UpdatePresent(HWND hwnd, IDirect3DDevice9* d3d9device) {
 	if (d3d9device) d3d9device->Present(NULL, NULL, hwnd, NULL);
 }
 
+std::wstring AskVideoFilePath() {
+	using Microsoft::WRL::ComPtr;
+
+	ComPtr<IFileOpenDialog> fileDialog;
+
+	CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+		IID_IFileOpenDialog, reinterpret_cast<void**>(fileDialog.GetAddressOf()));
+
+	fileDialog->SetTitle(L"选择视频文件");
+
+	COMDLG_FILTERSPEC rgSpec[] =
+	{
+		{ L"Video", L"*.mp4;*.mkv;*.flv;*.flac" },
+	};
+	fileDialog->SetFileTypes(1, rgSpec);
+	fileDialog->Show(NULL);
+
+	ComPtr<IShellItem> list;
+	fileDialog->GetResult(&list);
+
+	if (list.Get()) {
+		PWSTR pszFilePath;
+		list->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+		return pszFilePath;
+	}
+	else {
+		return L"";
+	}
+}
+
 int main(int argc, char** argv)
 {
+	SetProcessDPIAware();
+	CoInitializeEx(NULL, COINIT::COINIT_MULTITHREADED);
+
 	static bool isPlay = true;
 
 	static int audioStreamIndex = -1;
@@ -122,9 +167,17 @@ int main(int argc, char** argv)
 	static AVRational atimebase = {};
 	AVBufferRef* hw_device = nullptr;
 
+	string filePath;
+	if (argc <= 1) {
+		filePath = w2s(AskVideoFilePath());
+	}
+	else {
+		filePath = argv[1];
+	}
+
 	// 打开视频容器
 	static AVFormatContext* avfCtx = 0;
-	avformat_open_input(&avfCtx, argv[1], NULL, NULL);
+	avformat_open_input(&avfCtx, filePath.c_str(), NULL, NULL);
 	avformat_find_stream_info(avfCtx, NULL);
 
 	for (int i = 0; i < avfCtx->nb_streams; i++) {
@@ -153,11 +206,14 @@ int main(int argc, char** argv)
 		}
 	}
 
-	SharedQueue<AVFrame*> videoQueue(10);
+	static bool isPause = false;
+
+	SharedQueue<AVFrame*> videoQueue(16);
 	SharedQueue<AVFrame*> audioQueue(16);
+	SharedQueue<AVPacket*> packetQueue(32);
 	static int64_t audioCurrentPTS = 0;
 
-	auto tDecode = thread([&videoQueue, &audioQueue]() {
+	auto tDecode = thread([&packetQueue]() {
 		while (isPlay) {
 			AVPacket* packet = av_packet_alloc();
 			int ret = av_read_frame(avfCtx, packet);
@@ -167,6 +223,18 @@ int main(int argc, char** argv)
 				isPlay = false;
 				return;
 			}
+
+			packetQueue.push_back(packet);
+		}
+
+	});
+
+	std::mutex mutex_requestFrame;
+	auto static requestFrame = [&videoQueue, &audioQueue, &packetQueue, &mutex_requestFrame]() {
+		std::unique_lock<std::mutex> mlock(mutex_requestFrame);
+		while (1) {
+			auto packet = packetQueue.front();
+			packetQueue.pop_front();
 
 			if (packet->stream_index == audioStreamIndex) {
 				int ret = avcodec_send_packet(acodecCtx, packet);
@@ -184,6 +252,8 @@ int main(int argc, char** argv)
 				else if (ret == 0) {
 					// 解码成功
 					audioQueue.push_back(frame);
+					av_packet_free(&packet);
+					break;
 				}
 			}
 			else if (packet->stream_index == videoStraemIndex) {
@@ -201,13 +271,14 @@ int main(int argc, char** argv)
 				}
 				else if (ret == 0) {
 					videoQueue.push_back(frame);
+					av_packet_free(&packet);
+					break;
 				}
 			}
-
+			
 			av_packet_free(&packet);
 		}
-
-	});
+	};
 
 	static map<AVSampleFormat, ma_format> ma_format_map = {
 		{ AV_SAMPLE_FMT_S16, ma_format_s16 },
@@ -222,7 +293,7 @@ int main(int argc, char** argv)
 	config.dataCallback = [](ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
 		static AudioDataBuffer audioDataBuffer;
 
-		if (isPlay == false) {
+		if (isPlay == false || isPause == true) {
 			return;
 		}
 
@@ -231,6 +302,10 @@ int main(int argc, char** argv)
 		auto& data = audioDataBuffer.data;
 
 		while (size > data.size()) {
+			while (audioQueue->size() == 0) {
+				requestFrame();
+			}
+
 			auto frame = audioQueue->front();
 
 			if (frame->data[1] && pDevice->playback.format == ma_format_f32) {
@@ -270,22 +345,18 @@ int main(int argc, char** argv)
 	}
 
 	// 创建窗口
-	SetProcessDPIAware();
 	auto hInstance = GetModuleHandle(NULL);
 	auto className = L"winplay";
-	static bool isPause = false;
 
 	WNDCLASSEX wc = {};
 	wc.cbSize = sizeof(wc);
 	wc.hInstance = hInstance;
 	wc.lpszClassName = className;
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
 		static bool isDrag = false;
 		static int dragStartX = 0;
 		static int dragStartY = 0;
-
-		static bool isScale = false;
-		static int scaleStartY = 0;
 
 		switch (msg) {
 		case WM_MOUSEMOVE:
@@ -305,18 +376,6 @@ int main(int argc, char** argv)
 
 				SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE);
 			}
-			if (isScale) {
-				auto y = GET_Y_LPARAM(lParam);
-				auto offsetY = (y - scaleStartY) * 0.1;
-
-				RECT rect;
-				GetWindowRect(hwnd, &rect);
-
-				int newY = rect.bottom - rect.top + offsetY;
-				int newX = newY * ((double)vcodecCtx->width / vcodecCtx->height);
-
-				SetWindowPos(hwnd, HWND_TOP, 0, 0, newX, newY, SWP_NOMOVE);
-			}
 			break;
 		}
 		case WM_LBUTTONDOWN:
@@ -326,13 +385,6 @@ int main(int argc, char** argv)
 			break;
 		case WM_LBUTTONUP:
 			isDrag = false;
-			break;
-		case WM_RBUTTONDOWN:
-			scaleStartY = GET_Y_LPARAM(lParam);
-			isScale = true;
-			break;
-		case WM_RBUTTONUP:
-			isScale = false;
 			break;
 		case WM_KEYUP:
 			if (wParam == VK_ESCAPE) {
@@ -344,17 +396,39 @@ int main(int argc, char** argv)
 			break;
 		case WM_MOUSEWHEEL:
 		{
-			float volume = 0;
-			ma_device_get_master_volume(&device, &volume);
+			short mk = LOWORD(wParam);
+			if (mk == MK_CONTROL) {
+				int offset;
+				short wheel = HIWORD(wParam);
+				if (wheel > 0) {
+					offset = 8;
+				}
+				else {
+					offset = -8;
+				}
 
-			short wheel = HIWORD(wParam);
-			if (wheel > 0) {
-				volume += 0.05;
+				RECT rect;
+				GetWindowRect(hwnd, &rect);
+
+				int newY = rect.bottom - rect.top + offset;
+				int newX = newY * ((double)vcodecCtx->width / vcodecCtx->height);
+
+				SetWindowPos(hwnd, HWND_TOP, 0, 0, newX, newY, SWP_NOMOVE);
 			}
 			else {
-				volume -= 0.05;
+				float volume = 0;
+				ma_device_get_master_volume(&device, &volume);
+
+				short wheel = HIWORD(wParam);
+				if (wheel > 0) {
+					volume += 0.05;
+				}
+				else {
+					volume -= 0.05;
+				}
+				ma_device_set_master_volume(&device, volume);
 			}
-			ma_device_set_master_volume(&device, volume);
+
 			break;
 		}
 		case WM_DESTROY:
@@ -385,13 +459,16 @@ int main(int argc, char** argv)
 	MSG msg;
 	while (isPlay) {
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			printf("%d\n", msg.message);
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
 
 		if (msg.message == WM_QUIT) {
 			break;
+		}
+
+		while (videoQueue.size() == 0) {
+			requestFrame();
 		}
 
 		auto frame = videoQueue.front();
@@ -424,6 +501,8 @@ int main(int argc, char** argv)
 	ma_device_uninit(&device);
 
 	audioQueue.clear();
+	videoQueue.clear();
+	packetQueue.clear();
 	tDecode.join();
 
 	avcodec_free_context(&vcodecCtx);
