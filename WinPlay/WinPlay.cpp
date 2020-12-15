@@ -174,6 +174,9 @@ int main(int argc, char** argv)
 	else {
 		filePath = argv[1];
 	}
+	if (filePath.empty()) {
+		return -1;
+	}
 
 	// 打开视频容器
 	static AVFormatContext* avfCtx = 0;
