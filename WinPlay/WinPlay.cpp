@@ -396,6 +396,17 @@ int main(int argc, char** argv)
 			else if (wParam == VK_SPACE) {
 				isPause = !isPause;
 			}
+			else if (wParam == 13) {
+				static bool isMAX = false;
+				if (isMAX) {
+					isMAX = false;
+					SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+				}
+				else {
+					isMAX = true;
+					SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+				}
+			}
 			break;
 		case WM_MOUSEWHEEL:
 		{
@@ -404,10 +415,10 @@ int main(int argc, char** argv)
 				int offset;
 				short wheel = HIWORD(wParam);
 				if (wheel > 0) {
-					offset = 8;
+					offset = 10;
 				}
 				else {
-					offset = -8;
+					offset = -10;
 				}
 
 				RECT rect;
